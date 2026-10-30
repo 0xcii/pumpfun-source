@@ -15,6 +15,16 @@ script=args.script.expanduser().resolve();paths=protected_inputs(script)
 for path in paths:
     if same_file(args.receipt,path):p.error('receipt path aliases protected input: '+str(path))
 args.receipt=args.receipt.expanduser().resolve();loader.install();sys.path.insert(0,str(script.parent));sys.argv=[str(script),*args.arguments]
-try:runpy.run_path(str(script),run_name='__main__')
+# The receipt is also written after a failed harness run, so it must say so:
+# without an explicit marker a crashed run is indistinguishable from a
+# successful reproduction at receipt level.
+completed=False;failure=None
+try:runpy.run_path(str(script),run_name='__main__');completed=True
+except BaseException as error:failure=f'{type(error).__name__}: {error}';raise
 finally:
-    args.receipt.parent.mkdir(parents=True,exist_ok=True);args.receipt.write_text(json.dumps({'scope':loader.__doc__,'harness':str(script),'input_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in paths},'loads':loader.LOADS},indent=2)+'\n')
+    record={'scope':loader.__doc__,'harness':str(script),'input_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in paths},'loads':loader.LOADS,'ok':completed}
+    if failure is not None:record['error']=failure
+    try:
+        args.receipt.parent.mkdir(parents=True,exist_ok=True);args.receipt.write_text(json.dumps(record,indent=2)+'\n')
+    except OSError:
+        if completed:raise  # never mask the harness failure with receipt trouble

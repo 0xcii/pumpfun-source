@@ -42,7 +42,7 @@ class CapturedLoaderReceiptPathTests(unittest.TestCase):
         self.harness = self.root / "harness.py"
         self.harness.write_text("print('fixture completed')\n", encoding="utf-8")
 
-    def run_wrapper(self, receipt):
+    def run_wrapper(self, receipt, harness=None):
         return subprocess.run(
             [
                 sys.executable,
@@ -50,7 +50,7 @@ class CapturedLoaderReceiptPathTests(unittest.TestCase):
                 str(self.wrapper),
                 "--receipt",
                 str(receipt),
-                str(self.harness),
+                str(harness or self.harness),
             ],
             text=True,
             capture_output=True,
@@ -111,8 +111,22 @@ class CapturedLoaderReceiptPathTests(unittest.TestCase):
         record = json.loads(receipt.read_text())
         self.assertEqual(record["harness"], str(self.harness.resolve()))
         self.assertEqual(record["loads"], [])
+        self.assertIs(record["ok"], True)
+        self.assertNotIn("error", record)
         expected = hashlib.sha256(self.harness.read_bytes()).hexdigest()
         self.assertEqual(record["input_sha256"][str(self.harness.resolve())], expected)
+
+    def test_failed_harness_run_is_marked_on_the_receipt(self):
+        harness = self.root / "failing.py"
+        harness.write_text("raise RuntimeError('fixture exploded')\n", encoding="utf-8")
+        receipt = self.root / "work/failed-receipt.json"
+        result = self.run_wrapper(receipt, harness)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fixture exploded", result.stderr)
+        record = json.loads(receipt.read_text())
+        self.assertIs(record["ok"], False)
+        self.assertIn("RuntimeError: fixture exploded", record["error"])
+        self.assertEqual(record["harness"], str(harness.resolve()))
 
 
 if __name__ == "__main__":
