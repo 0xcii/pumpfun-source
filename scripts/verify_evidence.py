@@ -60,7 +60,7 @@ def main():
         check(m['program']==PROGRAM_ADDRESS[key], f'{key}: capture program {m["program"]}, expected {PROGRAM_ADDRESS[key]}')
         if m.get('loader')=='legacy-v2':
             p=(folder/'program-account.bin').read_bytes(); b=(folder/'deployed.so').read_bytes()
-            check(p==b and sha(b)==m['payload_sha256']==m['program_sha256'] and len(b)==m['payload_bytes'])
+            check(p==b and sha(b)==m['payload_sha256']==m['program_sha256'] and type(m['payload_bytes']) is int and len(b)==m['payload_bytes'])
             check(m['owner']=='BPFLoader2111111111111111111111111111111111')
             slots=m['context_slots']; check(slots and slots==sorted(slots) and len(slots)==2)
             check(m['genesis_hash']=='5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d')
@@ -76,7 +76,7 @@ def main():
         if d[12] not in (0,1):
             raise ValueError(f'{key}: invalid ProgramData upgrade authority option tag {d[12]}')
         check((b58(d[13:45]) if d[12] else None)==m['upgrade_authority'])
-        check(d[45:]==b and len(b)==m['payload_bytes'] and len(d)==m['programdata_bytes'])
+        check(d[45:]==b and type(m['payload_bytes']) is int and len(b)==m['payload_bytes'] and type(m['programdata_bytes']) is int and len(d)==m['programdata_bytes'])
         check(m['owner']=='BPFLoaderUpgradeab1e11111111111111111111111')
         check(m['genesis_hash']=='5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d')
         slots=m['context_slots']; check(slots and slots==sorted(slots) and len(slots)==4 and m['last_deploy_slot']<=slots[0])
