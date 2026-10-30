@@ -98,6 +98,79 @@ class DeepDisassemblyPublicationTests(unittest.TestCase):
             self.assertFalse(output.exists(), "failed analysis published a partial packet")
             self.assertEqual(list(output.parent.iterdir()), [])
 
+    def test_replacement_retains_prior_packet_and_late_additions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output, staging = root / 'packet', root / 'staging'
+            output.mkdir(); staging.mkdir()
+            (output / 'old').write_bytes(b'old evidence')
+            output.chmod(0o700)
+            identity = deep_disassembly.directory_identity(output)
+            (output / 'late').write_bytes(b'concurrent addition')
+            (staging / 'new').write_bytes(b'new evidence')
+            deep_disassembly.publish_packet(staging, output, identity)
+            self.assertEqual((output / 'new').read_bytes(), b'new evidence')
+            self.assertEqual(output.stat().st_mode & 0o777, 0o700)
+            backups = list(root.glob('.packet.previous-*'))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual((backups[0] / 'old').read_bytes(), b'old evidence')
+            self.assertEqual((backups[0] / 'late').read_bytes(), b'concurrent addition')
+
+    def test_native_publish_failure_preserves_late_empty_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output, staging = root / 'packet', root / 'staging'
+            staging.mkdir()
+            (staging / 'new').write_bytes(b'new evidence')
+            rename = deep_disassembly.rename_directory
+            def competing_writer(source, destination, **kwargs):
+                output.mkdir()
+                return rename(source, destination, **kwargs)
+            with mock.patch.object(deep_disassembly, 'rename_directory', competing_writer):
+                with self.assertRaises(FileExistsError):
+                    deep_disassembly.publish_packet(staging, output, None)
+            self.assertTrue(output.is_dir())
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertFalse(staging.exists())
+
+    def test_exchange_failure_keeps_existing_packet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output, staging = root / 'packet', root / 'staging'
+            output.mkdir(); staging.mkdir()
+            (output / 'old').write_bytes(b'old evidence')
+            identity = deep_disassembly.directory_identity(output)
+            with mock.patch.object(deep_disassembly, 'rename_directory', side_effect=OSError('exchange refused')):
+                with self.assertRaisesRegex(OSError, 'exchange refused'):
+                    deep_disassembly.publish_packet(staging, output, identity)
+            self.assertEqual((output / 'old').read_bytes(), b'old evidence')
+            self.assertFalse(staging.exists())
+
+    def test_directory_replaced_during_exchange_is_restored_without_deletion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output, staging = root / 'packet', root / 'staging'
+            output.mkdir(); staging.mkdir()
+            (output / 'old').write_bytes(b'old evidence')
+            (staging / 'new').write_bytes(b'new evidence')
+            identity = deep_disassembly.directory_identity(output)
+            rename = deep_disassembly.rename_directory
+            calls = 0
+            def competing_writer(source, destination, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    output.rename(root / 'writer-moved-old')
+                    output.mkdir()
+                    (output / 'other').write_bytes(b'other writer')
+                return rename(source, destination, **kwargs)
+            with mock.patch.object(deep_disassembly, 'rename_directory', competing_writer):
+                with self.assertRaisesRegex(ValueError, 'changed during publication'):
+                    deep_disassembly.publish_packet(staging, output, identity)
+            self.assertEqual((output / 'other').read_bytes(), b'other writer')
+            self.assertEqual((staging / 'new').read_bytes(), b'new evidence')
+            self.assertEqual((root / 'writer-moved-old' / 'old').read_bytes(), b'old evidence')
+
 
 if __name__ == "__main__":
     unittest.main()

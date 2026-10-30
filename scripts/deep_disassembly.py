@@ -10,6 +10,10 @@ Produces per-window disassembly with:
 - Stack frame analysis (frame pointer usage)
 - Bytecode signature fingerprints for pattern matching
 
+Replacement keeps the preceding complete packet in a sibling .previous- directory.
+Atomic directory exchange requires Linux or macOS; unsupported hosts fail closed.
+For a first publication the destination must remain absent.
+
 Usage:
     python3 scripts/deep_disassembly.py --program pump --output research/pump-deep-disasm-20261028
 """
@@ -19,6 +23,8 @@ import collections
 import gzip
 import hashlib
 import io
+import ctypes
+import errno
 import json
 import os
 import shutil
@@ -598,7 +604,7 @@ def prepare_destination(output_dir):
                      or ((output_dir / name).exists() and not (output_dir / name).is_file()))
     if invalid:
         raise ValueError("packet entry is not a regular file: " + ", ".join(invalid))
-    return output_dir, packet_files
+    return output_dir, packet_files, directory_identity(output_dir)
 
 
 def temporary_sibling(output_dir, label):
@@ -613,20 +619,66 @@ def temporary_sibling(output_dir, label):
         return staging
 
 
-def publish_packet(staging, output_dir):
-    backup = None
-    if output_dir.exists():
+def directory_identity(path):
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("output path is not a directory")
+    return metadata.st_dev, metadata.st_ino
+
+
+def rename_directory(source, destination, *, exchange=False):
+    """Use native atomic exchange or no-replace semantics, never plain POSIX rename."""
+    if os.name == "nt" and not exchange:
+        source.rename(destination)
+        return
+    library = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        rename = getattr(library, "renamex_np", None)
+        args = (os.fsencode(source), os.fsencode(destination), 2 if exchange else 4)
+        types = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+    elif sys.platform.startswith("linux"):
+        rename = getattr(library, "renameat2", None)
+        args = (-100, os.fsencode(source), -100, os.fsencode(destination), 2 if exchange else 1)
+        types = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    else:
+        rename = None
+    if rename is None:
+        raise OSError(errno.ENOTSUP, "atomic packet publication unavailable; use a supported host")
+    rename.argtypes = types
+    rename.restype = ctypes.c_int
+    if rename(*args) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(destination))
+
+
+def publish_packet(staging, output_dir, expected_identity):
+    exchanged = False
+    try:
+        if directory_identity(output_dir) != expected_identity:
+            raise ValueError("output directory changed during analysis")
+        if expected_identity is None:
+            rename_directory(staging, output_dir)
+            return
+        staging.chmod(stat.S_IMODE(output_dir.stat().st_mode))
+        rename_directory(staging, output_dir, exchange=True)
+        exchanged = True
+        if directory_identity(staging) != expected_identity:
+            # A directory replacement raced the exchange. Restore it and keep
+            # the generated packet for inspection rather than remove either tree.
+            rename_directory(staging, output_dir, exchange=True)
+            raise ValueError(f"output directory changed during publication; staging retained at {staging}")
         backup = temporary_sibling(output_dir, "previous")
         backup.rmdir()
-        output_dir.rename(backup)
-    try:
-        staging.rename(output_dir)
+        rename_directory(staging, backup)
+        print(f"[disasm] retained previous packet at {backup}")
     except BaseException:
-        if backup is not None and backup.exists():
-            backup.rename(output_dir)
+        if not exchanged:
+            shutil.rmtree(staging, ignore_errors=True)
         raise
-    if backup is not None:
-        shutil.rmtree(backup)
+
 
 
 def build_packet(program, output_dir, output_label):
@@ -958,14 +1010,14 @@ def main():
         print(f"ERROR: {deployed_path} not found")
         return 1
 
-    output_dir, _ = prepare_destination(args.output)
+    output_dir, _, expected_identity = prepare_destination(args.output)
     staging = temporary_sibling(output_dir, "staging")
     try:
         build_packet(args.program, staging, output_dir)
-        publish_packet(staging, output_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    publish_packet(staging, output_dir, expected_identity)
     return 0
 
 
