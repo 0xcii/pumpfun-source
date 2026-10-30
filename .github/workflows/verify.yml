@@ -150,6 +150,17 @@ jobs:
               python -B tests/test_dependency_cache_manifest_state.py
               python -B research/tooling-indirect-call-decoding-20261030/test_verify.py
               python -B tests/test_checkpoint_manifest_paths.py
+          - suite: runtime-input-regressions
+            commands: |
+              python -B scripts/test_admin_token_incentives_verify_encoding.py
+              python -B scripts/test_pump_v3_configured_fee_surfpool_encoding.py
+              python -B scripts/test_pump_migrate_v2_surfpool_encoding.py
+              python -B scripts/test_pump_migrate_surfpool_encoding.py
+              python -B scripts/test_pump_holder_distribution_surfpool_encoding.py
+              python -B scripts/test_pump_exact_quote_surfpool_encoding.py
+              python -B scripts/test_pump_fee_sweep_encoding.py
+              python -B scripts/test_pump_creator_collect_encoding.py
+              python -B scripts/test_pump_surfpool_optimized_mode.py
           # Packets that pin the digest of a reviewed tool snapshot or of its output. They fail
           # by design when the bound tool changes, until the packet is re-reviewed and re-bound;
           # kept apart so a stale binding does not stop the rest of the evidence suite.
