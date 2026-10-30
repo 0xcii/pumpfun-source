@@ -270,16 +270,18 @@ def main():
     parser.add_argument("--candidate", type=Path)
     parser.add_argument("--output", type=Path, default=OUT)
     args = parser.parse_args()
-    assert sha(ORIGINAL.read_bytes()) == \
+    original = pin_program(ORIGINAL)
+    assert sha(original.read_bytes()) == \
            "7a19affaa2c6187e04a5fe0ea298cee81fa5eb8c24cfcc30d85f615e89f7b02d"
     pinned = pin_program(args.candidate) if args.candidate else None
     if args.candidate:
-        build = json.loads(BUILD.read_text())
+        build_bytes = BUILD.read_bytes()
+        build = json.loads(build_bytes)
         assert build["comparison"]["candidate_sha256"] == sha(pinned.read_bytes())
-        assert build["comparison"]["original_sha256"] == sha(ORIGINAL.read_bytes())
+        assert build["comparison"]["original_sha256"] == sha(original.read_bytes())
     report_rows = []
     for case in CASES:
-        target = run_case(ORIGINAL, case)
+        target = run_case(original, case)
         candidate = run_case(pinned, case) if pinned else None
         differences = ([] if candidate is None else [
             name for name in ("error", "before", "after", "event_data_base64", "inner")
@@ -288,9 +290,9 @@ def main():
                             "differences": differences})
     receipt = {"scope": "Signed isolated current-Pump claim_token_incentives differential with captured program-created UserVolume/mint/user ATA and explicit synthetic daily schedule/incentive vault; no live transaction or funds.",
                "baseline_commit": "4ffe8bd88761059693e481ae972443c10204f7af",
-               "target_sha256": sha(ORIGINAL.read_bytes()),
+               "target_sha256": sha(original.read_bytes()),
                "candidate_sha256": sha(pinned.read_bytes()) if pinned else None,
-               "build_receipt_sha256": sha(BUILD.read_bytes()) if args.candidate else None,
+               "build_receipt_sha256": sha(build_bytes) if args.candidate else None,
                "idl_sha256": sha(IDL.read_bytes()),
                "fixture_sha256": sha(FIXTURE.read_bytes()),
                "dependency_sha256": {name: sha((ROOT / f"evidence/dependencies/{name}/deployed.so").read_bytes())
