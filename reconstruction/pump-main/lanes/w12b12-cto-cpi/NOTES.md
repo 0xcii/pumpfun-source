@@ -62,3 +62,78 @@ markers) near `holder_key`. These objects make up the +80/-48 B breaks that rema
 | seedsinline | both signed CPIs take `&[&[b"pool-authority",mint.as_ref(),&[bump]]]` inline | 27,584 | 0.39982 | size |
 | pocurveargs | pool CPI args read back from the curve account | 27,368 | 0.26589 | size |
 | shclos | sharing CPI as a migrate.rs-style `move \|signer_seeds:&[&[&[u8]];1]\|` closure | 27,432 | 0.40808 | size |
+| shclosinl | the same closure, called with inline seeds | 27,520 | 0.40741 | size |
+| poclos | pool CPI as a migrate.rs-style closure, called as `cto(&[poolseeds])?` | 27,080 | 0.25980 | size |
+| poclosinl | the pool closure, called with inline seeds | 27,200 | 0.28391 | size |
+| poacclet | pool CPI accounts struct bound with `let` before `new_with_signer` | 27,400 | 0.37148 | 0/0 |
+| shacclet | sharing CPI accounts struct bound with `let` | 27,368 | 0.41876 | size |
+| walletinline | `wallet` body written inline in `execute` (emit seeds become execute MIR locals) | 28,920 | 0.09926 | 1 normalized |
+| walletinlalways | `#[inline(always)] fn wallet` (MIR-inlined) | 27,184 | 0.36481 | size |
+| tgtout | validate writes target through `&mut Pubkey`, returns `Result<()>` | 27,264 | 0.28202 | size |
+| tgtunit | validate returns `Result<()>`; target computed in execute | 27,024 | 0.13909 | size |
+
+The same oracle was found independently by w12a02-cto-iroracle (#2772) and w12a12-cto-ctxuse (#2786). Both
+have the full slot map of the original from T 0x530 to 0x6c0. ctxuse also measured the pad and merge variants.
+
+## Round 2 (main b5975fa / 70f2704): admin_cto 0.45147, 3,308 slots, 27,400 B
+
+### Gain: pool-authority signer seeds as one nested literal (+0.0009 at 27,400 B, 0 losses)
+
+```rust
+// before
+let pb=[ctx.bumps.pool_authority];let poolseeds:&[&[u8]]=&[b"pool-authority",mint.as_ref(),&pb];let signer_seeds:&[&[&[u8]]]=&[poolseeds];
+// after
+let signer_seeds:&[&[&[u8]]]=&[&[b"pool-authority",mint.as_ref(),&[ctx.bumps.pool_authority]]];
+```
+
+| metric | main 70f2704 | this change |
+| --- | ---: | ---: |
+| admin_cto ratio | 0.45147 | **0.45237** |
+| admin_cto slots_diff | 3,308 | 3,308 |
+| admin_cto bytes | 27,400 | 27,400 |
+| normalized / raw | 1034 / 1034 | 1034 / 1034 |
+| losses / raw losses | | 0 / 0 |
+| admin_cto runtime differential | | 363 cases, 0 mismatches |
+| unstripped sha256 | | 9a06045fc5ac1ac7… |
+
+Mechanism: the seed stores before the sharing CPI now follow the original's order (`0x26680..0x26708` in the
+original). The bump load comes first, then the `&bump`, `&mint` and `"pool-authority"` pointer stores, then the bump byte
+store, then the signer-slice pointer, and last the lengths 1, 0x20, 0xe and 3. With separate `pb`/`poolseeds` locals,
+the bump byte was stored first and the signer slice after the lengths. Only the -16 B slot shift from
+the emit signer slice remains in this block. w10r1-admincto-cpi measured the same form (v2) on e61baa9
+(+0.0009, same size) but never landed it.
+
+PR #2776 (notes) was merged. This round continues on `swarm/w12b12-cto-cpi-2`.
+
+### StackColoring trace tool: `tools/scmerge.py` (about 5 s, no build slot)
+
+`scmerge.py --ll module.ll --sym admin_cto7execute [--edit e.py] --slot NAME` extracts the function with
+the debug build's `llvm-extract` and runs the debug `llc` with `-debug-only=stack-coloring`. It prints every
+StackColoring group (representative, size, members) and where each `--slot` ended up. The extracted
+module compiles to the same bytes as the full module (27,400 B, identical disassembly).
+
+What it shows for the emit signer slice `%_117.i74` (#41) on main 20a1ae9 IR:
+- Every StackColoring group of 16 B or more has exactly one member that is live at the slice's start.
+  That member is a sibling from the same `emit_cpi!`/event: `ix.i` (#22), `e.i` (#37), `_114.i` (#15),
+  `_94.i` (#46), `authority_info.i` (#49), `_120.i` (#40), `_110.i` (#43), `ix_data.i` (#47),
+  `inner_data.i` (#48), `val.sroa.6.i` (#54). The other two groups are `holder_key` and `mint`, which
+  live across the wallet. So the slice has no host and becomes its own representative at fi41. It
+  then absorbs validate's 7 B `target.i.sroa.0`.
+- Growing the target pieces to 24 B, as in the original's 8/24 split, fills the existing 24 B groups but adds no
+  new host. validate's tail goes to `ix_data.i` (#47), the `?` ControlFlow tail `_37.sroa.11` to
+  `inner_data.i` (#48), and execute's `target.sroa.8` to `val.sroa.6.i` (#54). All three are absorbed
+  before the 16 B slice is considered (size order), so the slice stays at fi41 (ratio unchanged).
+- The original has one more 24 B tail copy, at T 0x680. It is written at the validation join and read just
+  before `prepare_bonding_curve`. That fourth piece, live while the other three are, becomes its own
+  representative and hosts the slice. An IR emulation (`tools/ired/x6.py`: a fourth 24 B `t24` between
+  `target.sroa.8` and `target1`) did not reproduce it. The copy through `t24` was store-forwarded away in the DAG,
+  which left an EMPTY interval. The original's T24 survives codegen, so its accesses are not
+  forwardable within one block.
+
+### CPI-form trials on main b5975fa
+
+| variant | change | bytes | ratio | losses |
+| --- | --- | ---: | ---: | --- |
+| m2_shvalt | sharing CPI `val` built from the validated target (`Some(Some(t))`, t = target before the `st.creator` override) instead of `Some(new)` | 27,568 | 0.42736 | size |
+| m2_shvalt2 | the same, as `let su=(Some(Some(target)),false);` | byte-identical to m2_shvalt | | |
+| m2_seedsnested / m3_seedsnested | nested signer-seed literal (above) | 27,400 | **0.45237** | 0 / 0 |
