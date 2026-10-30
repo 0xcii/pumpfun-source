@@ -2239,6 +2239,68 @@ class MemoryWidthDecodeTests(unittest.TestCase):
                 self.assertEqual(mismatches, 0)
 
 
+class LddwImmediateDecodeTests(unittest.TestCase):
+    # LDDW carries one unsigned 64-bit value: low word, then high word.
+    def test_both_words_form_one_unsigned_value(self):
+        for low, high in ((0, 0), (0x80000000, 0), (0xffffffff, 0x7fffffff),
+                          (0, 0x80000000), (0xffffffff, 0xffffffff),
+                          (0x1f6dafaf, 0xed9b980d)):
+            with self.subTest(low=hex(low), high=hex(high)):
+                blob = struct.pack('<BBhIBBhI', 0x18, 4, 0, low, 0, 0, 0, high)
+                record, size = deep_disassembly.decode_instruction(blob, 0, None)
+                value = high << 32 | low
+                self.assertEqual(record['imm64'], value)
+                self.assertEqual(record['mnemonic'], f'lddw r4, {value:#018x}')
+                self.assertEqual(record['hex'], blob.hex())
+                self.assertEqual(size, 16)
+
+    def test_captured_selector_constants_match_the_dispatch_table(self):
+        # Selectors with bit 63 set; every one used to print as a negative value.
+        expected_high = {'pump': 33, 'pump_amm': 28, 'pump_fees': 15}
+        for name, high_count in expected_high.items():
+            with self.subTest(program=name):
+                elf = deep_disassembly.Elf(
+                    analyze.ROOT / 'evidence/original' / name / 'deployed.so')
+                selectors = deep_disassembly.load_idl_discriminators(elf)
+                table = deep_disassembly.recover_anchor_dispatch(elf)
+                offset = elf.lo
+                sites = high = 0
+                while offset < elf.hi:
+                    record, size = deep_disassembly.decode_instruction(elf.b, offset, elf)
+                    raw = elf.b[offset + 4:offset + 8] + elf.b[offset + 12:offset + 16]
+                    if elf.b[offset] == 0x18 and raw in selectors:
+                        value = int.from_bytes(raw, 'little')
+                        self.assertIn(hex(value), table)
+                        self.assertEqual(record['imm64'], value)
+                        self.assertEqual(record['mnemonic'],
+                                         f"lddw r{record['dst']}, {value:#018x}")
+                        sites += 1
+                        high += value >> 63
+                    offset += size
+                self.assertEqual(sites, len(table))
+                self.assertEqual(high, high_count)
+
+    def test_every_captured_lddw_matches_its_encoded_bytes(self):
+        for name in ('pump', 'pump_amm', 'pump_fees', 'mayhem'):
+            with self.subTest(program=name):
+                elf = deep_disassembly.Elf(
+                    analyze.ROOT / 'evidence/original' / name / 'deployed.so')
+                offset = elf.lo
+                high = mismatches = 0
+                while offset < elf.hi:
+                    record, size = deep_disassembly.decode_instruction(elf.b, offset, elf)
+                    if elf.b[offset] == 0x18:
+                        value = int.from_bytes(
+                            elf.b[offset + 4:offset + 8] + elf.b[offset + 12:offset + 16],
+                            'little')
+                        high += value >> 63
+                        mismatches += (record['imm64'] != value
+                                       or not record['mnemonic'].endswith(f'{value:#018x}'))
+                    offset += size
+                self.assertGreater(high, 0)
+                self.assertEqual(mismatches, 0)
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tests.test_current_bindings_paths import CurrentBindingsPathTests
 from test_fees_error_messages_exit import FeesErrorMessageExitTests
