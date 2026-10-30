@@ -12,6 +12,7 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 import bytecode_signatures as tool
+import deep_disassembly as publisher
 
 
 def generate(output):
@@ -64,6 +65,39 @@ class BytecodeSignaturesAtomicPublicationTests(unittest.TestCase):
 
             self.assertEqual(packet_hashes(output), before)
             self.assertEqual(list(output.parent.glob('.packet.staging-*')), [])
+
+    def test_native_publish_does_not_replace_a_late_empty_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'packet'
+            rename = publisher.rename_directory
+            def competing_writer(source, destination, **kwargs):
+                output.mkdir()
+                return rename(source, destination, **kwargs)
+            with mock.patch.object(publisher, 'rename_directory', competing_writer):
+                with self.assertRaises(FileExistsError):
+                    generate(output)
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(list(output.parent.glob('.packet.staging-*')), [])
+
+    def test_replacement_preserves_old_packet_late_files_and_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'packet'
+            generate(output)
+            before = packet_hashes(output)
+            output.chmod(0o700)
+            build = tool._build_packet
+            def competing_writer(*args):
+                result = build(*args)
+                (output / 'late.txt').write_bytes(b'late evidence')
+                return result
+            with mock.patch.object(tool, '_build_packet', competing_writer):
+                generate(output)
+            previous = list(output.parent.glob('.packet.previous-*'))
+            self.assertEqual(len(previous), 1)
+            after = packet_hashes(previous[0])
+            self.assertEqual({name: after[name] for name in before}, before)
+            self.assertEqual((previous[0] / 'late.txt').read_bytes(), b'late evidence')
+            self.assertEqual(output.stat().st_mode & 0o777, 0o700)
 
 
 if __name__ == '__main__':

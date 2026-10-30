@@ -10,6 +10,10 @@ Builds a signature database from all three programs, identifying:
 - Token transfer patterns
 - Anchor serialization/deserialization patterns
 
+Publication uses shared atomic no-replace/exchange operations. Replacements
+retain the prior packet in a printed .previous-* sibling; unsupported hosts
+fail closed.
+
 Usage:
     python3 scripts/bytecode_signatures.py --output research/bytecode-signatures-20261028
 """
@@ -22,12 +26,12 @@ import shutil
 import stat
 import struct
 import sys
-import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 from window_elf_reader import Elf
+from deep_disassembly import directory_identity, publish_packet, temporary_sibling
 
 PROGRAMS = ["pump", "pump_amm", "mayhem"]
 
@@ -558,20 +562,13 @@ def main():
     args = parser.parse_args()
     output_dir = Path(args.output)
     identity = prepare_destination(output_dir)
-    staging = temporary_sibling(output_dir)
+    staging = temporary_sibling(output_dir, "staging")
     try:
         _build_packet(staging, output_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    if identity is None:
-        if output_dir.exists():
-            shutil.rmtree(staging, ignore_errors=True)
-            raise FileExistsError(output_dir)
-        staging.rename(output_dir)
-    else:
-        from deep_disassembly import publish_packet
-        publish_packet(staging, output_dir, identity)
+    publish_packet(staging, output_dir, identity)
 
 
 def expected_packet_files(programs=None):
@@ -598,17 +595,6 @@ def linked(path):
             or bool(getattr(metadata, "st_reparse_tag", 0)))
 
 
-def temporary_sibling(output_dir):
-    while True:
-        staging = output_dir.parent / (
-            f'.{output_dir.name}.staging-{os.getpid()}-{uuid.uuid4().hex}')
-        try:
-            staging.mkdir()
-        except FileExistsError:
-            continue
-        return staging
-
-
 def prepare_destination(output_dir):
     output_dir = Path(output_dir)
     if linked(output_dir):
@@ -627,9 +613,6 @@ def prepare_destination(output_dir):
                          and not (output_dir / name).is_file()))
     if invalid:
         raise ValueError("packet entry is not a regular file: " + ", ".join(invalid))
-    if not output_dir.exists():
-        return None
-    from deep_disassembly import directory_identity
     return directory_identity(output_dir)
 
 
