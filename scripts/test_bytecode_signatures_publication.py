@@ -21,6 +21,22 @@ def generate(output):
 
 
 class BytecodeSignaturePublicationTests(unittest.TestCase):
+    def test_symlinked_packet_entry_is_rejected_before_the_target_is_modified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "packet"
+            output.mkdir()
+            target = root / "external-summary.json"
+            target.write_text("external sentinel\n")
+            try:
+                (output / "summary.json").symlink_to(target)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"symlinks are unavailable: {error}")
+            with self.assertRaisesRegex(ValueError, "packet entry is not a regular file: summary.json"):
+                generate(output)
+            self.assertEqual(target.read_text(), "external sentinel\n")
+            self.assertEqual([path.name for path in output.iterdir()], ["summary.json"])
+
     def test_stale_entry_is_rejected_before_any_packet_file_is_written(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "packet"
