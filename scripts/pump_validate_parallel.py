@@ -121,7 +121,8 @@ def main():
     args.output = args.output.resolve()
     args.build_comparison = args.build_comparison.resolve()
     args.source_directory = args.source_directory.resolve()
-    candidate = pin_program(args.candidate.resolve())
+    candidate_input = args.candidate.resolve()
+    candidate = pin_program(candidate_input)
     original = ROOT / 'evidence/original/pump/deployed.so'
     record = json.loads(args.build_comparison.read_text())
     assert record['returncode'] == 0 and record['source_unchanged']
@@ -142,7 +143,7 @@ def main():
     failed_suite_outputs = {}
     retained = args.output.parent / (args.output.name + '.suites')
     previous = None
-    protected = [*bound_files, *(ROOT / name for name in sources), *scripts.values()]
+    protected = [candidate_input, *bound_files, *(ROOT / name for name in sources), *scripts.values()]
     if args.validate_existing:
         raw = args.validate_existing.read_bytes()
         previous = json.loads(gzip.decompress(raw) if raw.startswith(b'\x1f\x8b') else raw)
