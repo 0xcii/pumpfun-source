@@ -38,24 +38,26 @@ class LinkInterpreterTests(unittest.TestCase):
                      'system-python': os.defpath, 'no-python': str(tools)}
             recipe = {'triple': 'sbf-solana-solana', 'rustc': sdk / 'rust/bin/rustc',
                       'template': root / 'no-template'}
-            before = snapshot(source)
-            control = None
             with patch.object(fastbuild, 'SDK', sdk), \
                  patch.dict(fastbuild.RECIPES, {'identity': recipe}), \
                  patch.object(fastbuild, 'LOCKDIR', root / 'locks'), \
                  patch.object(Path, 'home', return_value=root / 'home'):
-                for label, path in paths.items():
-                    with self.subTest(path=label), patch.dict(os.environ, {'PATH': path}):
-                        result = fastbuild.build(source, work, output, recipe='identity', quiet=True)
-                        self.assertTrue(result['ok'], (output / 'build.log').read_text())
-                        current = hashlib.sha256((output / 'unstripped.so').read_bytes()).hexdigest()
-                        if control is None:
-                            control = current
-                        else:
-                            self.assertEqual(current, control)
-                        self.assertTrue((output / 'link-receipt.json').is_file())
-                        self.assertTrue((output / 'link.map').is_file())
-            self.assertEqual(snapshot(source), before)
+                for pinned in (True, False):
+                    if not pinned:
+                        (source / 'link/ordered.ld').unlink()
+                    before, control = snapshot(source), None
+                    for label, path in paths.items():
+                        with self.subTest(pinned=pinned, path=label), patch.dict(os.environ, {'PATH': path}):
+                            result = fastbuild.build(source, work, output, recipe='identity', quiet=True)
+                            self.assertTrue(result['ok'], (output / 'build.log').read_text())
+                            current = hashlib.sha256((output / 'unstripped.so').read_bytes()).hexdigest()
+                            if control is None:
+                                control = current
+                            else:
+                                self.assertEqual(current, control)
+                            self.assertEqual((output / 'link-receipt.json').is_file(), pinned)
+                            self.assertEqual((output / 'link.map').is_file(), pinned)
+                    self.assertEqual(snapshot(source), before)
 
 
 if __name__ == '__main__':

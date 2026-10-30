@@ -106,7 +106,7 @@ class HookTests(unittest.TestCase):
             env, record = L.configure(crate, root / 'rust/bin/rustc', root / 'r.json')
             self.assertEqual(env['PUMP_LINK_ROOT_CRATE'], 'pump_recovered')
             self.assertEqual(env['RUSTC_WRAPPER'], str(L.H / 'pump_link_rustc.sh'))
-            self.assertEqual(env['PUMP_LINK_PYTHON'], sys.executable)
+            self.assertEqual(env['PUMP_RECON_PYTHON'], sys.executable)
             self.assertEqual(env['PUMP_LINK_LLD'], str(lld))
             self.assertEqual(record['selectors']['.text'], 1)
             self.assertEqual(record['lld_sha256'], L.sha(lld))

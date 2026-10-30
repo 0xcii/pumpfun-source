@@ -10,7 +10,7 @@ data commands are admitted, so the output is still exactly the compiler's sectio
 linked by the same rust-lld, only placed in a different order.
 
 Hooks (entry points `pump_link_rustc.sh`, `pump_link_lld.sh`, using the configuring Python):
-- RUSTC_WRAPPER: for the root cdylib only, append `-C linker=pump_link_lld.py` (an untracked
+- RUSTC_WRAPPER: for the root cdylib only, append `-C linker=pump_link_lld.sh` (an untracked
   rustc option: object code and every dependency are unchanged), then run the next wrapper.
 - linker: reject response-file inputs, check the incoming script is the default one, swap in the
   pinned script, write a receipt and a link map beside it, and exec the real rust-lld with otherwise
@@ -100,7 +100,7 @@ def configure(crate, rustc, receipt):
     if len(lld) != 1:
         raise ValueError('expected one host rust-lld beside ' + str(rustc))
     env = {'RUSTC_WRAPPER': str(H / 'pump_link_rustc.sh'),
-            'PUMP_LINK_PYTHON': sys.executable,
+            'PUMP_RECON_PYTHON': sys.executable,
             'PUMP_LINK_NEXT_WRAPPER': str(H / 'pump_physical_source_wrapper.py'),
             'PUMP_LINK_ROOT_CRATE': lib_name,
             'PUMP_LINK_SCRIPT': str(script.resolve()),
