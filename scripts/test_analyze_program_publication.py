@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from analyze_program import analyze_program
 
@@ -59,6 +60,21 @@ class AnalyzeProgramPublicationTests(unittest.TestCase):
                     analyze_program("mayhem", output)
 
             self.assertEqual(list(outside.iterdir()), [])
+
+
+    def test_packet_bytes_do_not_follow_the_host_line_ending(self):
+        # Path.write_text defaults to newline=None, which translates "\n" to
+        # os.linesep; the same analysis then hashes differently on a CRLF
+        # host than on the Linux CI. Simulate a CRLF host on any platform
+        # and require byte-identical LF output.
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "packet"
+            with mock.patch("os.linesep", "\r\n"):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    analyze_program("mayhem", output)
+            for path in sorted(output.iterdir()):
+                with self.subTest(entry=path.name):
+                    self.assertNotIn(b"\r", path.read_bytes())
 
 
 if __name__ == "__main__":
