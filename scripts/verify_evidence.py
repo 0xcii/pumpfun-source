@@ -72,7 +72,7 @@ def main():
         check(b58(p[4:])==m['programdata'])
         check_programdata_pda(m)
         check(struct.unpack_from('<I',d)[0]==3)
-        check(struct.unpack_from('<Q',d,4)[0]==m['last_deploy_slot'])
+        check(type(m['last_deploy_slot']) is int and struct.unpack_from('<Q',d,4)[0]==m['last_deploy_slot'])
         if d[12] not in (0,1):
             raise ValueError(f'{key}: invalid ProgramData upgrade authority option tag {d[12]}')
         check((b58(d[13:45]) if d[12] else None)==m['upgrade_authority'])
