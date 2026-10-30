@@ -1,10 +1,7 @@
-"""acquire_harness PumpSwap callers execute and report one candidate image.
+"""Six Pump differential CLIs execute and report one candidate image per run.
 
-cashback, creator_reassignment, extend and incentives pass the candidate path to
-candidate path again for every case and hash the path
-when writing the report. Each test runs
-the real CLI with a candidate that is replaced by another image after the first
-candidate case; the run must still execute and report only the first bytes.
+Each real CLI continues using the initially admitted program bytes after its
+candidate path is replaced following the first candidate case.
 """
 import gzip
 import hashlib
@@ -62,9 +59,10 @@ class PumpDifferentialPinnedImageTest(unittest.TestCase):
             proc = subprocess.run(
                 [sys.executable, '-B', '-c', DRIVER, str(script), str(candidate), str(OTHER),
                  '--candidate', str(candidate), '--output', str(output), *extra],
-                cwd=ROOT, capture_output=True, text=True, env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'})
-            self.assertEqual(sha(candidate), sha(OTHER), 'candidate was not replaced')
+                cwd=ROOT, capture_output=True, text=True, timeout=180,
+                env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'})
             self.assertEqual(proc.returncode, 0, proc.stdout[-2000:] + proc.stderr[-2000:])
+            self.assertEqual(sha(candidate), sha(OTHER), 'candidate was not replaced')
             data = output.read_bytes()
             report = json.loads(gzip.decompress(data) if data[:2] == b'\x1f\x8b' else data)
         self.assertEqual(report['candidate_sha256'], sha(ORIGINAL))
