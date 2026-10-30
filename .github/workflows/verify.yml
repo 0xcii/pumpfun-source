@@ -108,6 +108,7 @@ jobs:
               python -B scripts/test_supported_sbpf_package_paths.py
               python -B scripts/test_pump_quote_control_function_match_output.py
               python -B reconstruction/toolchain/test_dependency_cache.py
+              python -B reconstruction/mayhem/native-linux-qualification/test_vendor_membership.py
               python -B scripts/test_analyze_program_publication.py
               python -B scripts/test_reconstruction_roadmap_publication.py
               python -B scripts/test_bytecode_signatures_publication.py
@@ -120,6 +121,9 @@ jobs:
               python -O -B tests/test_function_body_file_ranges.py
               python -B reconstruction/harness/test_treediff_line_boundaries.py
               python -B reconstruction/harness/test_score_inputs.py
+              python -B reconstruction/harness/test_score_symbol_admission.py
+              python -B reconstruction/pump-main/test_ledger_negative_limit.py
+              python -B reconstruction/diagnostics/census-portability/test_output_guard.py
               python -B reconstruction/harness/test_experiment_declared_name.py
               python -B reconstruction/harness/test_experiment_worktree_source.py
               python -B reconstruction/harness/test_bisect_membership.py
@@ -155,6 +159,7 @@ jobs:
               python -B research/tooling-revalidation-manifests-20261030/test_verify.py
               python -B research/tooling-revalidation-invocation-20261030/test_verify.py
               python -B reconstruction/tooling/revalidation-qualification/test_audit.py
+              python -B reconstruction/tooling/revalidation-qualification/test_capture_memory.py
               python -B -m unittest discover -s reconstruction/tooling/revalidation-qualification -p 'test_packet_root_links.py'
               python -B -m unittest discover -s reconstruction/tooling/revalidation-qualification -p 'test_packet_identity_stability.py'
               python -B reconstruction/relocation-text-addresses/test_analyze.py
