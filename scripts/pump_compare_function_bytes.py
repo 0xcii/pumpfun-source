@@ -54,6 +54,8 @@ def selected_window(stream, original_start):
 
 
 
+
+
         matches = []
         for row in reader:
             if row['program'] != 'pump' or row['variant'] != 'selected':
@@ -66,6 +68,8 @@ def selected_window(stream, original_start):
                 raise ValueError(
                     f'invalid selected Pump window bounds at {start:#x}'
                 )
+
+
 
 
             if start == original_start:
