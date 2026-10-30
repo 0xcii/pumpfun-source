@@ -14,7 +14,9 @@ changes only the lifecycle around those checks:
 
 The exact reviewed root source is pinned as SHA-256
 `3f8e5965ddbebb9ff5947061ceffc4f661d3fc53eea32dbc5352f190c2fbb1b1`.
-The adapter refuses to execute if those bytes change. This binding includes #2522's empty-manifest rejection and #2559's UTF-8/LF packet writes; the adapter already rejects empty manifests, and the writer change preserves audit content.
+The adapter refuses to execute if those bytes change. This binding includes
+#2522's empty-manifest rejection and #2559's UTF-8/LF packet writes; the adapter
+already rejects empty manifests, and the writer change preserves audit content.
 
 ## Reproduced defects
 
