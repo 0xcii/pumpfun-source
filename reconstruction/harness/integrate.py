@@ -11,7 +11,7 @@ changes retain `patch -p2 --forward`. Rejects are reported and the part is skipp
 Output: SC/integ/<NAME>/{src, parts/<label>.patch, rejects/, report.json}
 Names must be fresh; an earlier result is never overwritten.
 """
-import argparse, ast, json, shutil, subprocess, sys, re
+import argparse, ast, json, os, shutil, subprocess, sys, re
 from pathlib import Path
 
 H = Path(__file__).resolve().parent
@@ -75,7 +75,9 @@ def make_patch(base: Path, part: Path, out: Path, tmp: Path):
                 '--dst-prefix=', '--', 'a/pump', 'b/pump']
 
     def run_diff(command):
-        result = subprocess.run(command, cwd=tmp, capture_output=True)
+        # Binary-file diagnostics are parsed below; do not inherit a translated locale.
+        result = subprocess.run(command, cwd=tmp, capture_output=True,
+                                env=dict(os.environ, LC_ALL='C'))
         if result.returncode not in (0, 1):
             raise subprocess.CalledProcessError(result.returncode, result.args,
                                                 output=result.stdout, stderr=result.stderr)

@@ -1,11 +1,13 @@
 """Composition must carry binary changes instead of reporting them as applied."""
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 TOOL = Path(__file__).with_name('integrate.py')
@@ -68,6 +70,18 @@ class BinaryCompositionTests(unittest.TestCase):
 
     def test_removed_binary_beside_a_text_change(self):
         self.assert_composed({'data.bin': OLD}, {'src/lib.rs': TEXT}, ['data.bin', 'src/lib.rs'])
+
+    @unittest.skipIf(sys.platform == 'win32', 'executable shell fixture requires POSIX')
+    def test_binary_detection_does_not_inherit_a_translated_locale(self):
+        shim = self.root/'bin'; shim.mkdir()
+        wrapper = shim/'diff'
+        real_diff = shutil.which('diff')
+        wrapper.write_text('#!/bin/sh\nif [ "$LC_ALL" = C ]; then exec "'+real_diff+'" "$@"; fi\n'
+                           "printf 'Fichiers binaires differents\\n'\nexit 1\n")
+        wrapper.chmod(0o755)
+        with mock.patch.dict(os.environ, PATH=str(shim)+os.pathsep+os.environ['PATH'], LC_ALL='translated-fixture'):
+            self.assert_composed({'data.bin': OLD}, {'data.bin': NEW, 'src/lib.rs': TEXT},
+                                 ['data.bin', 'src/lib.rs'])
 
 
 if __name__ == '__main__':
