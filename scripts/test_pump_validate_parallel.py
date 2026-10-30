@@ -75,6 +75,15 @@ class ParallelReportPublicationTests(unittest.TestCase):
         self.assertFalse(self.run_validator(output))
         self.assertEqual(json.loads(output.read_bytes())['case_count'], 1)
 
+    def test_malformed_loader_completion_marker_is_not_admitted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'loader.json'
+            for flag in (0, 1, None, "false", "true"):
+                with self.subTest(flag=flag):
+                    path.write_text(json.dumps({'loads': [{}], 'ok': flag}))
+                    with self.assertRaisesRegex(AssertionError, 'invalid loader completion marker'):
+                        validator.validate_loader_receipt('suite', path, path, path, path, [])
+
     def test_failed_loader_receipt_is_not_admitted(self):
         # A receipt written after a failed harness run carries ok:false and
         # the failure text; admission must reject it before binding checks,

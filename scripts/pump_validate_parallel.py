@@ -86,7 +86,9 @@ def validate_loader_receipt(name, path, script, candidate, original, inputs):
     assert loaded['loads'], name
     # Receipts written after a failed harness run carry ok:false; receipts
     # sealed before that marker existed keep their admission unchanged.
-    assert loaded.get('ok') is not False, (name, 'loader harness run failed', loaded.get('error'))
+    if 'ok' in loaded:
+        assert type(loaded['ok']) is bool, (name, 'invalid loader completion marker')
+        assert loaded['ok'], (name, 'loader harness run failed', loaded.get('error'))
     assert Path(loaded['harness']).resolve() == script.resolve(), name
     expected_inputs = {str(p): sha(p) for p in [*inputs, script]}
     assert loaded['input_sha256'] == expected_inputs, (name, 'loader inputs differ')

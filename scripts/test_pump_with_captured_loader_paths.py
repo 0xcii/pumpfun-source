@@ -129,5 +129,36 @@ class CapturedLoaderReceiptPathTests(unittest.TestCase):
         self.assertEqual(record["harness"], str(harness.resolve()))
 
 
+    def test_successful_system_exit_is_marked_successful(self):
+        for statement in ("raise SystemExit(0)", "raise SystemExit()", "raise SystemExit(False)"):
+            with self.subTest(statement=statement):
+                self.harness.write_text(statement + "\n", encoding="utf-8")
+                receipt = self.root / "system-exit-ok.json"
+                result = self.run_wrapper(receipt)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                record = json.loads(receipt.read_text())
+                self.assertIs(record["ok"], True)
+                self.assertNotIn("error", record)
+
+    def test_failed_system_exit_is_marked_failed(self):
+        self.harness.write_text("raise SystemExit('failed by request')\n", encoding="utf-8")
+        receipt = self.root / "system-exit-failed.json"
+        result = self.run_wrapper(receipt)
+        self.assertNotEqual(result.returncode, 0)
+        record = json.loads(receipt.read_text())
+        self.assertIs(record["ok"], False)
+        self.assertIn("failed by request", record["error"])
+
+    def test_receipt_hash_error_does_not_mask_harness_failure(self):
+        capture = self.root / "evidence/original/pump/capture.json"
+        self.harness.write_text(
+            "from pathlib import Path\n"
+            + "Path(" + repr(str(capture)) + ").unlink()\n"
+            + "raise RuntimeError('original fixture failed')\n", encoding="utf-8")
+        result = self.run_wrapper(self.root / "missing-input-receipt.json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("RuntimeError: original fixture failed", result.stderr)
+        self.assertNotIn("FileNotFoundError", result.stderr)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
