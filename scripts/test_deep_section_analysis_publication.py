@@ -34,15 +34,15 @@ class DeepSectionRelocationBoundsTests(unittest.TestCase):
     # One in-bounds entry: offset 0, size 16, blob of 32 bytes.
     VALID = (0, 0, 0, 0, 0, 16, 0, 0, 0, 16)
 
-    def test_truncated_relocation_table_does_not_crash_the_analysis(self):
+    def test_truncated_relocation_table_is_rejected(self):
         elf = fake_elf_with_relocations(self.TRUNCATED, 16)
-        result = deep_section_analysis.analyze_relocations(elf)
-        self.assertEqual(result, {"count": 0, "entries": [], "type_distribution": {}})
+        with self.assertRaisesRegex(ValueError, "truncated or misaligned relocation table"):
+            deep_section_analysis.analyze_relocations(elf)
 
-    def test_misaligned_relocation_table_does_not_crash_the_analysis(self):
+    def test_misaligned_relocation_table_is_rejected(self):
         elf = fake_elf_with_relocations(self.MISALIGNED, 64)
-        result = deep_section_analysis.analyze_relocations(elf)
-        self.assertEqual(result, {"count": 0, "entries": [], "type_distribution": {}})
+        with self.assertRaisesRegex(ValueError, "truncated or misaligned relocation table"):
+            deep_section_analysis.analyze_relocations(elf)
 
     def test_in_bounds_table_is_still_analyzed(self):
         elf = fake_elf_with_relocations(self.VALID, 32)
