@@ -33,7 +33,8 @@ _archived_rpc = module.rpc
 def contextual_rpc(url, method, params):
     result = _archived_rpc(url, method, params)
     if method == 'getAccountInfo':
-        slot = result.get('context', {}).get('slot') if isinstance(result, dict) else None
+        context = result.get('context') if isinstance(result, dict) else None
+        slot = context.get('slot') if isinstance(context, dict) else None
         if type(slot) is not int or slot < 0:
             raise ValueError('account response requires a nonnegative integer context slot')
         options = params[1] if len(params) > 1 else None
