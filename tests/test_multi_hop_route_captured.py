@@ -15,13 +15,17 @@ agree. Events are not compared. This shows matching behavior on these inputs
 only; it is not a byte-identity claim.
 """
 from pathlib import Path
+import copy
 import hashlib
 import json
 import random
+import re
 import struct
+from types import SimpleNamespace
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from solders.account import Account
 from solders.clock import Clock
@@ -136,7 +140,7 @@ def curve(base, quote, **over):
              creator=1, cashback=0, complete=0, mayhem=0, base_vault=10**15, quote_vault=None)
     c.update(over)
     if c['quote_vault'] is None:
-        c['quote_vault'] = c['rqr'] + c['cf'] + c['pf']
+        c['quote_vault'] = 0 if quote == 0 else c['rqr'] + c['cf'] + c['pf']
     return c
 
 
@@ -160,6 +164,22 @@ def host_line(r):
 
 
 _HOST = None
+_PROGRAM_BYTES = None
+
+
+def read_pinned_elf(path, digest):
+    payload = path.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != digest:
+        raise ValueError(f'captured ELF digest mismatch: {path}')
+    return payload
+
+
+def captured_program_bytes():
+    # Pin once and give the VM the exact immutable bytes which were checked.
+    global _PROGRAM_BYTES
+    if _PROGRAM_BYTES is None:
+        _PROGRAM_BYTES = tuple(read_pinned_elf(path, ELF_SHA256[path]) for path in (PUMP_ELF, TOKEN_ELF))
+    return _PROGRAM_BYTES
 
 
 def host_binary():
@@ -173,15 +193,19 @@ def host_binary():
 
 def model(routes):
     text = ''.join(host_line(r) + '\n' for r in routes)
-    return subprocess.run([str(host_binary())], input=text, capture_output=True, text=True, check=True).stdout.splitlines()
+    answers = subprocess.run([str(host_binary())], input=text, capture_output=True, text=True, check=True).stdout.splitlines()
+    if len(answers) != len(routes):
+        raise ValueError(f'host returned {len(answers)} answers for {len(routes)} routes')
+    return answers
 
 
 def run_captured(r):
+    pump_bytes, token_bytes = captured_program_bytes()
     vm = LiteSVM().with_transaction_history(0).with_sigverify(False)
     programdata = pda([bytes(PUMP)], UPGRADEABLE)
-    vm.set_account(programdata, Account(10**10, struct.pack('<IQB', 3, 0, 0) + bytes(32) + PUMP_ELF.read_bytes(), UPGRADEABLE, False))
+    vm.set_account(programdata, Account(10**10, struct.pack('<IQB', 3, 0, 0) + bytes(32) + pump_bytes, UPGRADEABLE, False))
     vm.set_account(PUMP, Account(10**9, struct.pack('<I', 2) + bytes(programdata), UPGRADEABLE, True))
-    vm.add_program_from_file(TOKEN, TOKEN_ELF)
+    vm.add_program(TOKEN, token_bytes)
     vm.set_clock(Clock(1000, 0, 0, 0, TS))
     user = USER.pubkey()
     state = {GLOBAL: (10**9, PUMP, global_data(r)), FEE_CONFIG: (10**9, FEES, fee_config_data()), user: (USER_LAMPORTS, SYSTEM, b'')}
@@ -236,39 +260,75 @@ def run_captured(r):
         a = vm.get_account(key)
         curves.append(dict(data=bytes(a.data), lamports=a.lamports - state[key][0], base_vault=amount(ata(key, MINTS[c['base']])),
                            quote_vault=amount(ata(key, MINTS[c['quote']]))))
+    rollback_errors = []
+    if failed:
+        for key, (lamports, owner, data) in state.items():
+            after = vm.get_account(key)
+            expected_lamports = lamports - TX_FEE if key == user else lamports
+            if (after is None or after.lamports != expected_lamports or after.owner != owner
+                    or bytes(after.data) != data or after.executable):
+                rollback_errors.append(str(key))
     return dict(error=str(result.err()) if failed else None, curves=curves, returned=bytes(meta.return_data().data),
+                rollback_errors=rollback_errors,
                 source=amount(source) - r['source_balance'], destination=amount(destination),
                 recipient=vm.get_account(recipient).lamports - TOKEN_RENT if r['recipient'] == 0 else amount(recipient),
                 user_lamports=vm.get_account(user).lamports - USER_LAMPORTS)
 
 
 def check(r, got, answer):
-    """List of mismatches between a captured run and the model's answer."""
-    if answer.startswith('error:'):
-        code = answer[6:]
-        return [] if f'Custom({code})' in str(got['error']) else [f"error {got['error']} != {code}"]
+    """List mismatches; malformed or incomplete model/capture results fail closed."""
+    error = re.fullmatch(r'error:([0-9]+)', answer)
+    if error:
+        captured = re.search(r'Custom\(([0-9]+)\)', str(got['error']))
+        bad = [] if captured and captured.group(1) == error.group(1) else [f"error {got['error']} != {error.group(1)}"]
+        if got.get('rollback_errors') != []:
+            bad.append('failed transaction did not restore every seeded account')
+        if (got['source'] != 0 or got['destination'] != (r['source_balance'] if r['source'] == r['destination'] else 0)
+                or got['recipient'] != 0 or got['user_lamports'] != -TX_FEE):
+            bad.append('failed transaction changed a user or recipient balance')
+        if len(got['curves']) != len(r['curves']):
+            bad.append('failed transaction curve count')
+        else:
+            for c, g in zip(r['curves'], got['curves']):
+                if (g['data'] != curve_data(c) or g['lamports'] != 0 or g['base_vault'] != c['base_vault']
+                        or g['quote_vault'] != c['quote_vault']):
+                    bad.append('failed transaction changed a curve or vault')
+        return bad
     if got['error'] is not None:
         return [f"captured failed with {got['error']}"]
     blocks = answer.split('|')
-    out, buyback, source, destination, lamports, recipient = map(int, blocks[0].split(',')[1:])
+    fields = blocks[0].split(',')
+    if len(fields) != 7 or fields[0] != 'ok':
+        return ['malformed model status or output fields']
+    if len(blocks) - 1 != len(r['curves']) or len(got['curves']) != len(r['curves']):
+        return ['model/capture curve count does not match route']
+    try:
+        out, buyback, source, destination, lamports, recipient = map(int, fields[1:])
+        curves = [list(map(int, block.split(','))) for block in blocks[1:]]
+    except ValueError:
+        return ['noninteger model output']
+    if any(len(values) != 12 for values in curves):
+        return ['malformed model curve fields']
+    if not 0 <= out <= U64 or not 0 <= buyback <= U64:
+        return ['model return value out of range']
     bad = []
     if got['returned'] != struct.pack('<QQ', out, buyback):
         bad.append('return data')
-    if r['source'] == r['destination']:
-        source, destination = source + destination, source + destination
-        want_dest = got['source'] + r['source_balance']
-    else:
-        want_dest = got['destination']
-    if got['source'] != source:
-        bad.append(f"source {got['source']} != {source}")
-    if r['source'] != r['destination'] and want_dest != destination:
-        bad.append(f'destination {want_dest} != {destination}')
+    expected_source = source + destination if r['source'] == r['destination'] else source
+    expected_destination = r['source_balance'] + expected_source if r['source'] == r['destination'] else destination
+    if got['source'] != expected_source:
+        bad.append(f"source {got['source']} != {expected_source}")
+    if got['destination'] != expected_destination:
+        bad.append(f"destination {got['destination']} != {expected_destination}")
     if got['user_lamports'] != lamports - TX_FEE:
         bad.append(f"user lamports {got['user_lamports']} != {lamports - TX_FEE}")
     if got['recipient'] != recipient:
         bad.append(f"recipient {got['recipient']} != {recipient}")
-    for c, g, block in zip(r['curves'], got['curves'], blocks[1:]):
-        vtr, vqr, rtr, rqr, cf, pf, post_base, post_quote, complete, base_vault, quote_vault, delta = map(int, block.split(','))
+    for c, g, values in zip(r['curves'], got['curves'], curves):
+        vtr, vqr, rtr, rqr, cf, pf, post_base, post_quote, complete, base_vault, quote_vault, delta = values
+        if any(not 0 <= value <= U64 for value in values[:11]) or complete not in (0, 1):
+            bad.append('model curve value out of range')
+            continue
         after = bytearray(curve_data(c))
         struct.pack_into('<QQQQ', after, 8, vtr, vqr, rtr, rqr)
         after[48] = complete
@@ -278,7 +338,7 @@ def check(r, got, answer):
             bad.append(f"curve {c['base']} bytes")
         if g['base_vault'] != base_vault:
             bad.append(f"curve {c['base']} base vault {g['base_vault']} != {base_vault}")
-        if c['quote'] != 0 and g['quote_vault'] != quote_vault:
+        if g['quote_vault'] != quote_vault:
             bad.append(f"curve {c['base']} quote vault {g['quote_vault']} != {quote_vault}")
         if g['lamports'] != delta:
             bad.append(f"curve {c['base']} lamports {g['lamports']} != {delta}")
@@ -414,11 +474,12 @@ def random_cases(count=120, seed=20261030):
 class MultiHopRouteCaptured(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        for path, digest in ELF_SHA256.items():
-            assert hashlib.sha256(path.read_bytes()).hexdigest() == digest, path
+        captured_program_bytes()
 
     def run_all(self, labelled):
+        self.assertTrue(labelled, 'at least one route is required')
         answers = model([r for _, r in labelled])
+        self.assertEqual(len(answers), len(labelled), 'one model answer is required per captured route')
         results = []
         for (label, r), answer in zip(labelled, answers):
             with self.subTest(label):
@@ -427,34 +488,117 @@ class MultiHopRouteCaptured(unittest.TestCase):
         return results
 
     def test_fixed_cases(self):
-        results = self.run_all(fixed_cases())
+        cases = fixed_cases()
+        self.assertEqual(len(cases), 387)
+        results = self.run_all(cases)
         outcomes = {a.split(',')[0] for a in results}
         for want in ('ok', 'error:1', 'error:3', 'error:6004', 'error:6005', 'error:6020', 'error:6021', 'error:6022', 'error:6024', 'error:6027',
                      'error:6041', 'error:6042', 'error:6094', 'error:6098', 'error:6106', 'error:6108'):
             self.assertIn(want, outcomes)
-        self.assertTrue(any(a.startswith('ok') and int(a.split('|')[1].split(',')[6]) > 0 for a in results), 'a crossing fill')
+        self.assertEqual(sum(a.startswith('ok,') for a in results), 342)
+        self.assertEqual(sum(a.startswith('ok,') and len(r['hops']) >= 2
+                             for (_, r), a in zip(cases, results)), 89, 'successful multi-hop routes')
+        self.assertEqual(sum(a.startswith('ok,') and any(int(b.split(',')[6]) > 0 for b in a.split('|')[1:])
+                             for a in results), 155, 'successful crossing fills')
 
     def test_random_cases(self):
-        results = self.run_all(random_cases())
-        self.assertGreaterEqual(sum(a.startswith('ok') for a in results), 40)
+        cases = random_cases()
+        self.assertEqual(len(cases), 120)
+        results = self.run_all(cases)
+        self.assertEqual(sum(a.startswith('ok,') for a in results), 102)
+        self.assertEqual(sum(a.startswith('ok,') and len(r['hops']) >= 2
+                             for (_, r), a in zip(cases, results)), 65, 'successful multi-hop routes')
+        self.assertEqual(sum(a.startswith('ok,') and any(int(b.split(',')[6]) > 0 for b in a.split('|')[1:])
+                             for a in results), 21, 'successful crossing fills')
 
-    def test_checker_rejects_tampered_outcomes(self):
-        r = route(spl_pair(), [0, 1], source=A, destination=B, flags=(3, 3))
+    def test_answer_cardinality_and_empty_batches_fail(self):
+        r = route(spl_pair(), [0, 1], source=A, destination=B)
+        with self.assertRaises(AssertionError):
+            self.run_all([])
+        for answers in ([], ['error:1', 'error:1']):
+            with self.subTest(answers=answers), patch.dict(globals(), {'model': lambda routes: answers}):
+                with self.assertRaises(AssertionError):
+                    self.run_all([('one', r)])
+        for stdout in ('', 'error:1\nerror:1\n'):
+            with self.subTest(stdout=stdout), patch.dict(globals(), {'_HOST': Path('/unused')}):
+                with patch('subprocess.run', return_value=SimpleNamespace(stdout=stdout)):
+                    with self.assertRaisesRegex(ValueError, 'answers for'):
+                        model([r])
+
+    def test_elf_bytes_are_pinned_and_not_reopened_for_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'elf'
+            path.write_bytes(b'pinned fixture')
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            bound = read_pinned_elf(path, digest)
+            path.write_bytes(b'replaced fixture')
+            self.assertEqual(bound, b'pinned fixture')
+            with self.assertRaisesRegex(ValueError, 'digest mismatch'):
+                read_pinned_elf(path, digest)
+        r = route(spl_pair(), [0, 1], source=A, destination=B)
+        answer = model([r])[0]
+        # setUpClass has already retained the validated bytes. A reread now must fail.
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('ELF reopened after pin')):
+            got = run_captured(r)
+        self.assertEqual(check(r, got, answer), [])
+
+    def test_checker_rejects_incomplete_or_malformed_outcomes(self):
+        r = route(spl_pair(), [0, 1], source=A, destination=B)
         answer = model([r])[0]
         got = run_captured(r)
-        self.assertEqual(check(r, got, answer), [])
         head, *curves = answer.split('|')
-        fields = head.split(',')
-        for i in range(1, len(fields)):
-            bent = fields[:i] + [str(int(fields[i]) + 1)] + fields[i + 1:]
-            self.assertNotEqual(check(r, got, '|'.join([','.join(bent)] + curves)), [], i)
-        for j, block in enumerate(curves):
-            parts = block.split(',')
-            for i in range(len(parts)):
-                bent = parts[:i] + [str(int(parts[i]) + 1)] + parts[i + 1:]
-                others = curves[:j] + [','.join(bent)] + curves[j + 1:]
-                self.assertNotEqual(check(r, got, '|'.join([head] + others)), [], (j, i))
-        self.assertNotEqual(check(r, got, 'error:6024'), [])
+        malformed = ['', answer.replace('ok,', 'unmodelled,', 1), 'error:', 'error:1junk',
+                     head, '|'.join([head] + curves[:-1]), answer + '|' + curves[-1],
+                     '|'.join([head] + [','.join(curves[0].split(',')[:-1])] + curves[1:]),
+                     answer.replace('ok,', 'ok,no-number,', 1)]
+        for bent in malformed:
+            with self.subTest(answer=bent):
+                self.assertNotEqual(check(r, got, bent), [])
+        for count in (0, 1, 3):
+            bent = copy.deepcopy(got)
+            bent['curves'] = (bent['curves'] * 2)[:count]
+            self.assertNotEqual(check(r, bent, answer), [])
+
+    def test_error_outcomes_require_rollback(self):
+        r = route([curve(A, Q), curve(B, Q, complete=1)], [0, 1], source=A, destination=B)
+        answer = model([r])[0]
+        got = run_captured(r)
+        self.assertEqual(answer, 'error:6005')
+        self.assertEqual(check(r, got, answer), [])
+        self.assertNotEqual(check(r, got, 'error:600'), [])
+        for key in ('source', 'destination', 'recipient', 'user_lamports'):
+            bent = copy.deepcopy(got)
+            bent[key] += 1
+            self.assertNotEqual(check(r, bent, answer), [], key)
+        for key in ('data', 'base_vault', 'quote_vault', 'lamports'):
+            bent = copy.deepcopy(got)
+            value = bent['curves'][0][key]
+            bent['curves'][0][key] = bytes([value[0] ^ 1]) + value[1:] if isinstance(value, bytes) else value + 1
+            self.assertNotEqual(check(r, bent, answer), [], key)
+        bent = dict(got, rollback_errors=['changed unrelated seeded account'])
+        self.assertNotEqual(check(r, bent, answer), [])
+
+    def test_checker_rejects_tampered_outcomes(self):
+        routes = [route(spl_pair(), [0, 1], source=A, destination=B, flags=(3, 3)),
+                  route([curve(A, 0)], [0], source=0, destination=A, flags=(3,)),
+                  route([curve(A, Q)], [0, 0], source=Q, destination=Q)]
+        for r, answer in zip(routes, model(routes)):
+            got = run_captured(r)
+            self.assertEqual(check(r, got, answer), [])
+            head, *curves = answer.split('|')
+            fields = head.split(',')
+            for i in range(1, len(fields)):
+                bent = fields[:i] + [str(int(fields[i]) + 1)] + fields[i + 1:]
+                self.assertNotEqual(check(r, got, '|'.join([','.join(bent)] + curves)), [], i)
+            for j, block in enumerate(curves):
+                parts = block.split(',')
+                for i in range(len(parts)):
+                    bent = parts[:i] + [str(int(parts[i]) + 1)] + parts[i + 1:]
+                    others = curves[:j] + [','.join(bent)] + curves[j + 1:]
+                    self.assertNotEqual(check(r, got, '|'.join([head] + others)), [], (j, i))
+            bent = dict(got, destination=got['destination'] + 1)
+            self.assertNotEqual(check(r, bent, answer), [])
+            self.assertNotEqual(check(r, got, 'error:6024'), [])
 
 
 if __name__ == '__main__':
