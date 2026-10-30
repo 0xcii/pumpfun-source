@@ -119,6 +119,7 @@ jobs:
               python -B reconstruction/harness/test_treediff_line_boundaries.py
               python -B reconstruction/harness/test_score_inputs.py
               python -B reconstruction/harness/test_experiment_declared_name.py
+              python -B reconstruction/harness/test_experiment_worktree_source.py
               python -B reconstruction/harness/test_bisect_membership.py
               python -B reconstruction/harness/test_minimize_oracle_encoding.py
               python -B reconstruction/harness/test_coords_cli_admission.py
