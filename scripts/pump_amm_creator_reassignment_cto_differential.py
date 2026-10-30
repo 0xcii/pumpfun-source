@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'scripts'))
 from fees_donation_create_differential import *
 import pump_validate_admin as pump
 import pump_amm_admin_differential as amm
-from pump_amm_pinned_program import pin_program
+from pump_amm_reusable_harness import pin_program
 from solders.clock import Clock
 from solders.compute_budget import set_compute_unit_limit
 TOKEN=Pubkey.from_string('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');ATA=Pubkey.from_string('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')

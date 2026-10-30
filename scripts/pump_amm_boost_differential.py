@@ -3,7 +3,7 @@
 import sys
 sys.path.insert(0,'scripts')
 from pump_amm_create_differential import *
-from pump_amm_pinned_program import pin_program
+from pump_amm_reusable_harness import pin_program
 def boost(candidate=None,overrides=None,fixture=False):
  r=create();h=Harness(candidate or pin_program(ROOT/'evidence/original/pump_amm/deployed.so'));h.vm.set_clock(Clock(100,1234567890,0,0,1234567890))
  for pid,n in [(TOKEN,'spl_token'),(TOKEN22,'spl_token_2022'),(ATA,'associated_token')]:h.vm.add_program_from_file(pid,ROOT/'evidence/dependencies'/n/'deployed.so')

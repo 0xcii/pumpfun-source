@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0,'scripts')
 from pump_amm_liquidity_differential import *
 from solders.litesvm import LiteSVM
-from pump_amm_pinned_program import pin_program
+from pump_amm_reusable_harness import pin_program
 PUMP=Pubkey.from_string(json.load(open('evidence/upstream/pump.json'))['address']);ATA=Pubkey.from_string('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
 p=json.load(open('research/imported-lab/analysis/pump_fun/curve-migrate-v2-signed-surfpool.json'))
 def run_migration(candidate=None,label='missing_boost',overrides=None):
