@@ -30,6 +30,19 @@ class DeepSectionPublicationTests(unittest.TestCase):
                 generate(output)
             self.assertEqual([path.name for path in output.iterdir()], ["stale.txt"])
 
+    def test_packet_bytes_do_not_follow_the_host_line_ending(self):
+        # Path.write_text defaults to newline=None, which translates "\n" to
+        # os.linesep; packets generated on a CRLF host then hash differently
+        # from the same analysis on Linux. Simulate a CRLF host on any
+        # platform and require byte-identical LF output.
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "packet"
+            with mock.patch("os.linesep", "\r\n"):
+                self.assertEqual(generate(output), 0)
+            for path in sorted(output.iterdir()):
+                with self.subTest(entry=path.name):
+                    self.assertNotIn(b"\r", path.read_bytes())
+
     def test_regenerated_packet_still_verifies(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "packet"
