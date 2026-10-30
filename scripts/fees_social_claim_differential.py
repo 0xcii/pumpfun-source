@@ -70,7 +70,7 @@ def cases():
  out += [{'name':'trailing-arguments','trailing':'ff01'},{'name':'zero-and-disabled','amount':0,'flags':2},{'name':'zero-and-rate','amount':0,'last':1700000000}]
  return out
 def main():
- p=argparse.ArgumentParser();p.add_argument('--candidate',type=pathlib.Path);p.add_argument('--output',type=pathlib.Path,required=True);a=p.parse_args();orig=ROOT/'evidence/original/pump_fees/deployed.so';o=Fixture(orig);b=Fixture(pin_program(a.candidate)) if a.candidate else None;rows=[];bad=[]
+ p=argparse.ArgumentParser();p.add_argument('--candidate',type=pathlib.Path);p.add_argument('--output',type=pathlib.Path,required=True);a=p.parse_args();orig=pin_program(ROOT/'evidence/original/pump_fees/deployed.so');o=Fixture(orig);b=Fixture(pin_program(a.candidate)) if a.candidate else None;rows=[];bad=[]
  for c in cases():
   x=o.run(c);y=b.run(c) if b else None;match=all(x[k]==y[k] for k in ['error','before','after','events','inner','return']) if b else None
   rows.append({'case':c,'original':x,'candidate':y,'match':match})
