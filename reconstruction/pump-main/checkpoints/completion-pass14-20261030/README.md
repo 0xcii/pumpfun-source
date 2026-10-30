@@ -18,7 +18,7 @@ Only `admin_cto::execute` remains unmatched: 48.742% instruction-token similarit
   cases** (774 fixed and 240 seeded random), including settlement and event bytes.
   All five tests pass, including response-count and immutable-image checks.
 - Account admission is assumed in the model; whitelisted mayhem resynchronization
-  and explicitly marked unconfirmed budget-shrink paths remain outside its proof.
+  and explicitly marked unconfirmed budget-shrink paths remain outside this test coverage.
 - These bounded results do not establish general runtime or whole-Pump identity.
   The [other four programs](../completion-20261030/other-programs.json) retain their
   prior exact-ELF checkpoints; none was newly rebuilt in this pass.
