@@ -46,7 +46,9 @@ jobs:
               python -B reconstruction/harness/test_integrate_failures.py
               python -B reconstruction/harness/test_integrate_no_build_cli.py
               python -B reconstruction/harness/test_integrate_empty_files.py
+              python -B reconstruction/harness/test_integrate_binary_files.py
               python -B reconstruction/harness/test_integrate_source_links.py
+              python -B reconstruction/harness/test_integrate_orig_sources.py
               python -I -B tests/test_integrate_patch_bytes.py
               python -I -B reconstruction/harness/test_treediff_links.py
           - suite: offline-cargo-cache
@@ -61,6 +63,7 @@ jobs:
               python -I -B tests/test_dispatch_root.py
               python -I -B tests/test_analyze_input_admission.py
               python scripts/test_tooling.py
+              python -B scripts/test_pump_diagnostic_audit_coverage.py
               python -B scripts/test_amm_harness_content_cache.py
               python -B tests/test_amm_pinned_candidate.py
               python -B tests/test_two_curve_optimization_guard.py
@@ -129,6 +132,7 @@ jobs:
               python -B reconstruction/harness/test_bisect_membership.py
               python -B reconstruction/harness/test_minimize_oracle_encoding.py
               python -B reconstruction/harness/test_coords_cli_admission.py
+              python -B reconstruction/harness/test_report_scorer_inputs.py
               python -B reconstruction/harness/test_match_oracle.py
               python -B reconstruction/harness/test_score_atomic_report.py
               python -B reconstruction/harness/test_coords_report_destination.py
