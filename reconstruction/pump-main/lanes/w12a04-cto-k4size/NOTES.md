@@ -36,16 +36,10 @@ Ported unchanged (only admin_cto.rs differs from main): **27,384 B, 0.4525**, 15
 Unstripped sha256 `784bea21ed580b15791d642573314f778751b461334a4a217edb90013d7cbd7e`.
 Runtime: `scripts/pump_admin_cto_differential.py`: 363/363 cases match.
 
-## Tooling (tools/)
+## Reproduction scope
 
-- `genes.py`: 74 line-count-preserving knobs over the k4 text (prologue, validate, wallet,
-  sweep, post-sweep); `python3 genes.py <admin_cto.rs>` checks that each applies exactly once.
-- `run.py <queue> <results.jsonl> [workers]`: background runner. Each queue line is
-  `<name> <base admin_cto.rs> gene...`; it copies the crate (`rsync --exclude target`), applies
-  the genes, runs `fastbuild.py` (shared slot lock) and `target_metric.py`, appends one JSON line,
-  keeps `.so` files only for 27,400 B hits above main's ratio.
-- `scoreso.sh <dir>`: the scoring half of `measure.sh` on an existing build (no rebuild).
-
-## Knob table on k4 (27,384 B, 0.4525)
-
-Measured singles and pairs are appended below as the search runs.
+This packet retains the selected source change and its measured result. The
+worker-specific search queue, mutation library and scoring wrapper are omitted;
+they depended on private worktree paths and were not needed to reproduce the
+selected candidate. Build with the maintained `reconstruction/harness/fastbuild.py`
+and score with `reconstruction/harness/score.py` against a fresh main build.
