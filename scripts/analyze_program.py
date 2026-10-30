@@ -13,8 +13,11 @@ import bisect
 import collections
 import hashlib
 import json
+import os
+import shutil
 import stat
 import sys
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -55,12 +58,14 @@ def sha256_file(path):
 
 def prepare_output_directory(output_dir):
     """Reject stale packet entries before any analysis output is replaced."""
+    output_dir = Path(output_dir)
     if linked(output_dir):
         raise ValueError("output directory is a link")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if linked(output_dir):
-        raise ValueError("output directory is a link")
-    unexpected = sorted(path.name for path in output_dir.iterdir()
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ValueError("output path is not a directory")
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    existing = list(output_dir.iterdir()) if output_dir.exists() else []
+    unexpected = sorted(path.name for path in existing
                         if path.name not in PACKET_FILES)
     if unexpected:
         raise ValueError("unexpected packet entry: " + ", ".join(unexpected))
@@ -70,9 +75,38 @@ def prepare_output_directory(output_dir):
                          and not (output_dir / name).is_file()))
     if invalid:
         raise ValueError("packet entry is not a regular file: " + ", ".join(invalid))
+    return output_dir
 
 
-def analyze_program(program_name, output_dir):
+def temporary_sibling(output_dir, label):
+    while True:
+        staging = output_dir.parent / (
+            f".{output_dir.name}.{label}-{os.getpid()}-{uuid.uuid4().hex}"
+        )
+        try:
+            staging.mkdir()
+        except FileExistsError:
+            continue
+        return staging
+
+
+def publish_packet(staging, output_dir):
+    backup = None
+    if output_dir.exists():
+        backup = temporary_sibling(output_dir, "previous")
+        backup.rmdir()
+        output_dir.rename(backup)
+    try:
+        staging.rename(output_dir)
+    except BaseException:
+        if backup is not None and backup.exists():
+            backup.rename(output_dir)
+        raise
+    if backup is not None:
+        shutil.rmtree(backup)
+
+
+def _build_packet(program_name, output_dir, output_label):
     deployed_path = REPO / "evidence" / "original" / program_name / "deployed.so"
     if not deployed_path.exists():
         print(f"ERROR: {deployed_path} not found")
@@ -82,7 +116,6 @@ def analyze_program(program_name, output_dir):
     elf = Elf(deployed_path)
 
     output_dir = Path(output_dir)
-    prepare_output_directory(output_dir)
 
     # --- Window inventory ---
     windows = []
@@ -363,7 +396,21 @@ if __name__ == "__main__":
     total_lines = sum(
         len((output_dir / name).read_text(encoding="utf-8").splitlines()) for name in manifest
     )
-    print(f"[analyze] wrote {len(manifest) + 1} files, ~{total_lines:,} lines to {output_dir}")
+    print(f"[analyze] wrote {len(manifest) + 1} files, ~{total_lines:,} lines to {output_label}")
+    return 0
+
+
+def analyze_program(program_name, output_dir):
+    output_dir = prepare_output_directory(output_dir)
+    staging = temporary_sibling(output_dir, "staging")
+    try:
+        result = _build_packet(program_name, staging, output_dir)
+        if result != 0:
+            return result
+        publish_packet(staging, output_dir)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     return 0
 
 

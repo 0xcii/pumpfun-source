@@ -1,6 +1,7 @@
 """Evidence-packet publication checks for analyze_program."""
 
 import contextlib
+import hashlib
 import io
 import os
 from pathlib import Path
@@ -9,6 +10,13 @@ import unittest
 from unittest import mock
 
 from analyze_program import analyze_program
+
+
+def packet_hashes(output):
+    return {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in output.iterdir()
+    }
 
 
 class AnalyzeProgramPublicationTests(unittest.TestCase):
@@ -91,6 +99,54 @@ class AnalyzeProgramPublicationTests(unittest.TestCase):
                     self.assertEqual(path.read_bytes(),
                                      (control / path.name).read_bytes())
                     self.assertNotIn(b"\r", path.read_bytes())
+
+    def test_failed_replacement_preserves_the_prior_complete_packet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "packet"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(analyze_program("mayhem", output), 0)
+            before = packet_hashes(output)
+            real_write_text = Path.write_text
+
+            def fail_call_graph(path, *args, **kwargs):
+                if path.name == "call-graph.json":
+                    raise OSError("injected packet write failure")
+                return real_write_text(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "write_text", fail_call_graph):
+                with self.assertRaisesRegex(OSError, "injected packet write failure"):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        analyze_program("pump", output)
+
+            after = packet_hashes(output)
+            self.assertEqual(sorted(after), sorted(before))
+            changed = sorted(name for name in before if after[name] != before[name])
+            self.assertFalse(
+                changed, f"failed analysis partially replaced the prior packet: {changed}"
+            )
+            self.assertEqual(
+                sorted(path.name for path in output.parent.iterdir()),
+                ["packet"],
+                "failed analysis left a staging directory behind",
+            )
+
+    def test_failure_does_not_publish_a_new_partial_packet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "packet"
+            real_write_text = Path.write_text
+
+            def fail_call_graph(path, *args, **kwargs):
+                if path.name == "call-graph.json":
+                    raise OSError("injected packet write failure")
+                return real_write_text(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "write_text", fail_call_graph):
+                with self.assertRaisesRegex(OSError, "injected packet write failure"):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        analyze_program("mayhem", output)
+
+            self.assertFalse(output.exists(), "failed analysis published a partial packet")
+            self.assertEqual(list(output.parent.iterdir()), [])
 
 
 if __name__ == "__main__":
