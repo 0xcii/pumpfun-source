@@ -1,4 +1,6 @@
 """Compile actual Pump and compare the same ELF at internal/external paths."""
+if not __debug__:
+    raise SystemExit('Normal Python is required; do not use -O or PYTHONOPTIMIZE.')
 import gzip
 import hashlib
 import json

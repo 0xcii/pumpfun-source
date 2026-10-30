@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Exercise buyback recipient lists using the unchanged configuration fixture."""
+if not __debug__:
+    raise SystemExit('Normal Python is required; do not use -O or PYTHONOPTIMIZE.')
 import argparse
 import ast
 import hashlib
@@ -63,6 +65,7 @@ def main():
     parser.add_argument('--candidate', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    args.candidate = args.candidate.resolve()
     assert not args.output.exists(), 'Use a fresh output path'
     original = ROOT / 'evidence/original/pump/deployed.so'
     inputs = [Path(__file__).resolve(), HARNESS, original,

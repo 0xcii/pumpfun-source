@@ -24,3 +24,9 @@ Real compiler records, ELF outputs, logs and complete VM reports are retained in
 is changed. This fixes path handling for this bounded replay, not source recovery,
 whole-program equality or security acceptance. Existing finite-comparison limits
 remain in each actual report.
+
+The CLI resolves its admitted candidate path once, so retargeting an input symlink
+cannot change the executed input between cases. The CLI and reproduction driver
+refuse optimized Python before work, preserving their input-integrity checks.
+`python -B tests/test_pump_buyback_external_candidate.py` exercises the real
+42-case internal/external controls, wrong-program negative, and symlink retarget.
