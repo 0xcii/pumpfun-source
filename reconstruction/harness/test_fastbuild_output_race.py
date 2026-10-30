@@ -41,7 +41,7 @@ class OutputLockTests(unittest.TestCase):
 class OutputRaceTests(unittest.TestCase):
     def exercise(self, shared):
         with tempfile.TemporaryDirectory(prefix='pump-output-race-') as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             sources = []
             for value in (17, 29):
                 source = root / f'source-{value}'
@@ -85,7 +85,10 @@ class OutputRaceTests(unittest.TestCase):
                 first = pool.submit(build, sources[0], work_a, out_a)
                 blocked, second = None, None
                 try:
-                    self.assertTrue(ready.wait(30), 'first real compilation did not finish')
+                    if not ready.wait(30):
+                        if first.done():
+                            first.result()  # Surface a failed build instead of masking it as a barrier timeout.
+                        self.fail('first build did not reach the publication barrier')
                     try:
                         second = build(sources[1], work_b, out_b)
                     except RuntimeError as error:
