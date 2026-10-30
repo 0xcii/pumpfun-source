@@ -87,6 +87,7 @@ jobs:
               python -B scripts/test_constant_product_range_pinning.py
               python -B scripts/test_fees_validate_all_optimization.py
               python -B scripts/test_claim_differentials_optimization.py
+              python -B scripts/test_differentials_optimization.py
               python -B scripts/test_fees_error_messages_precondition.py
               python -B scripts/test_validate_fee_handlers_optimized_exit.py
               python -B scripts/test_fees_external_codec_optimized_mode.py
