@@ -61,6 +61,8 @@ jobs:
             commands: |
               python -B research/tooling-relocated-data-pointers-20261030/test_pointer_analysis.py
               python scripts/verify_evidence.py
+              python -B scripts/test_verify_context_slot_bounds.py
+              python -B -O scripts/test_verify_context_slot_bounds.py
               python -I -B reconstruction/verification/retained_multihop_outcomes.py --repo-root .
               python -I -B tests/test_retained_multihop_outcomes.py
               python -I -B tests/test_dispatch_root.py
@@ -222,4 +224,3 @@ jobs:
             work/*.json
             work/*.json.gz
           if-no-files-found: ignore
-
