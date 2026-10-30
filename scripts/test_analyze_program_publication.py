@@ -63,17 +63,33 @@ class AnalyzeProgramPublicationTests(unittest.TestCase):
 
 
     def test_packet_bytes_do_not_follow_the_host_line_ending(self):
-        # Path.write_text defaults to newline=None, which translates "\n" to
-        # os.linesep; the same analysis then hashes differently on a CRLF
-        # host than on the Linux CI. Simulate a CRLF host on any platform
-        # and require byte-identical LF output.
+        # Model Windows text-I/O defaults at the actual file-open boundary.
+        # Patching os.linesep alone does not change CPython TextIOWrapper.
+        real_open = Path.open
+
+        def windows_text_open(path, mode="r", buffering=-1, encoding=None,
+                              errors=None, newline=None):
+            if "b" not in mode and any(flag in mode for flag in "wax"):
+                if newline is None:
+                    newline = "\r\n"
+                if encoding is None:
+                    encoding = "cp1252"
+            return real_open(path, mode, buffering=buffering, encoding=encoding,
+                             errors=errors, newline=newline)
+
         with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary) / "packet"
-            with mock.patch("os.linesep", "\r\n"):
-                with contextlib.redirect_stdout(io.StringIO()):
+            control = Path(temporary) / "control"
+            output = Path(temporary) / "windows-defaults"
+            with contextlib.redirect_stdout(io.StringIO()):
+                analyze_program("mayhem", control)
+                with mock.patch.object(Path, "open", windows_text_open):
                     analyze_program("mayhem", output)
+            self.assertEqual(sorted(p.name for p in control.iterdir()),
+                             sorted(p.name for p in output.iterdir()))
             for path in sorted(output.iterdir()):
                 with self.subTest(entry=path.name):
+                    self.assertEqual(path.read_bytes(),
+                                     (control / path.name).read_bytes())
                     self.assertNotIn(b"\r", path.read_bytes())
 
 
