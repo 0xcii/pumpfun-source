@@ -1,6 +1,7 @@
 """Evidence-packet publication checks for analyze_program."""
 
 import contextlib
+import hashlib
 import io
 import os
 from pathlib import Path
@@ -8,7 +9,16 @@ import tempfile
 import unittest
 from unittest import mock
 
+import analyze_program as analyzer
+import deep_disassembly as publisher
 from analyze_program import analyze_program
+
+
+def packet_hashes(output):
+    return {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in output.iterdir()
+    }
 
 
 class AnalyzeProgramPublicationTests(unittest.TestCase):
@@ -91,6 +101,137 @@ class AnalyzeProgramPublicationTests(unittest.TestCase):
                     self.assertEqual(path.read_bytes(),
                                      (control / path.name).read_bytes())
                     self.assertNotIn(b"\r", path.read_bytes())
+
+    def test_failed_replacement_preserves_the_prior_complete_packet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "packet"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(analyze_program("mayhem", output), 0)
+            before = packet_hashes(output)
+            real_write_text = Path.write_text
+
+            def fail_call_graph(path, *args, **kwargs):
+                if path.name == "call-graph.json":
+                    raise OSError("injected packet write failure")
+                return real_write_text(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "write_text", fail_call_graph):
+                with self.assertRaisesRegex(OSError, "injected packet write failure"):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        analyze_program("pump", output)
+
+            after = packet_hashes(output)
+            self.assertEqual(sorted(after), sorted(before))
+            changed = sorted(name for name in before if after[name] != before[name])
+            self.assertFalse(
+                changed, f"failed analysis partially replaced the prior packet: {changed}"
+            )
+            self.assertEqual(
+                sorted(path.name for path in output.parent.iterdir()),
+                ["packet"],
+                "failed analysis left a staging directory behind",
+            )
+
+    def test_failure_does_not_publish_a_new_partial_packet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "packet"
+            real_write_text = Path.write_text
+
+            def fail_call_graph(path, *args, **kwargs):
+                if path.name == "call-graph.json":
+                    raise OSError("injected packet write failure")
+                return real_write_text(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "write_text", fail_call_graph):
+                with self.assertRaisesRegex(OSError, "injected packet write failure"):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        analyze_program("mayhem", output)
+
+            self.assertFalse(output.exists(), "failed analysis published a partial packet")
+            self.assertEqual(list(output.parent.iterdir()), [])
+
+    def test_missing_program_removes_staging(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(analyze_program('does-not-exist-test-only', root / 'packet'), 1)
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_late_empty_output_directory_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / 'packet'
+            build = analyzer._build_packet
+            def late_writer(*args):
+                result = build(*args)
+                output.mkdir()
+                return result
+            with mock.patch.object(analyzer, '_build_packet', late_writer), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(ValueError, 'changed during analysis'):
+                    analyze_program('mayhem', output)
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(list(root.iterdir()), [output])
+
+    def test_successful_replacement_retains_prior_packet_and_late_addition(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / 'packet'
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(analyze_program('mayhem', output), 0)
+            before = packet_hashes(output)
+            output.chmod(0o700)
+            build = analyzer._build_packet
+            def late_writer(*args):
+                result = build(*args)
+                (output / 'late.txt').write_bytes(b'late user evidence')
+                return result
+            with mock.patch.object(analyzer, '_build_packet', late_writer), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(analyze_program('pump', output), 0)
+            backups = list(root.glob('.packet.previous-*'))
+            self.assertEqual(len(backups), 1)
+            after = packet_hashes(backups[0])
+            self.assertEqual({name: after[name] for name in before}, before)
+            self.assertEqual((backups[0] / 'late.txt').read_bytes(), b'late user evidence')
+            self.assertEqual(output.stat().st_mode & 0o777, 0o700)
+
+    def test_native_publication_failure_preserves_late_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / 'packet'
+            rename = publisher.rename_directory
+            def late_writer(source, destination, **kwargs):
+                output.mkdir()
+                return rename(source, destination, **kwargs)
+            with mock.patch.object(publisher, 'rename_directory', late_writer), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(FileExistsError):
+                    analyze_program('mayhem', output)
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(list(root.iterdir()), [output])
+
+    def test_exchange_race_retains_recovery_packet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / 'packet'
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(analyze_program('mayhem', output), 0)
+            rename = publisher.rename_directory
+            calls = 0
+            def late_writer(source, destination, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    output.rename(root / 'moved-old')
+                    output.mkdir()
+                    (output / 'other.txt').write_bytes(b'other writer')
+                return rename(source, destination, **kwargs)
+            with mock.patch.object(publisher, 'rename_directory', late_writer), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(ValueError, 'changed during publication'):
+                    analyze_program('pump', output)
+            self.assertEqual((output / 'other.txt').read_bytes(), b'other writer')
+            retained = list(root.glob('.packet.staging-*'))
+            self.assertEqual(len(retained), 1)
+            self.assertTrue((retained[0] / 'manifest.json').is_file())
+            self.assertTrue((root / 'moved-old' / 'manifest.json').is_file())
 
 
 if __name__ == "__main__":
