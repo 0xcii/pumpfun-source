@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -41,6 +42,32 @@ class Current673ArchivePublicationTests(unittest.TestCase):
             )
             self.assertEqual(destination.read_bytes(), payload)
             self.assertEqual(list(root.glob('.input.tar.bz2.*')), [])
+
+    def test_late_destination_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'source.bin'
+            source.write_bytes(b'authenticated archive')
+            destination = root / 'input.tar.bz2'
+            copy = controller.shutil.copyfileobj
+            def concurrent_writer(src, target):
+                copy(src, target)
+                destination.write_bytes(b'other retained archive')
+            with mock.patch.object(controller.shutil, 'copyfileobj', concurrent_writer):
+                with self.assertRaises(FileExistsError):
+                    controller.download_archive(source.as_uri(), sha(source.read_bytes()), destination)
+            self.assertEqual(destination.read_bytes(), b'other retained archive')
+            self.assertEqual(list(root.glob('.input.tar.bz2.*')), [])
+
+    def test_existing_destination_does_not_start_download(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / 'input.tar.bz2'
+            destination.write_bytes(b'existing archive')
+            with mock.patch.object(controller.urllib.request, 'urlopen') as download:
+                with self.assertRaises(FileExistsError):
+                    controller.download_archive('not-contacted', '0' * 64, destination)
+                download.assert_not_called()
+            self.assertEqual(destination.read_bytes(), b'existing archive')
 
 
 if __name__ == '__main__':

@@ -52,12 +52,13 @@ def download_archive(url, expected_sha256, destination):
         observed = sha(temporary)
         if observed != expected_sha256:
             raise ValueError(destination.stem + ' archive hash mismatch')
-        os.replace(temporary, destination)
+        # Link only to an absent name: a file created during the download
+        # belongs to its writer and must not be replaced.
+        os.link(temporary, destination)
         return observed
-    except BaseException:
+    finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-        raise
 
 
 def inspect(source_directory=None):
