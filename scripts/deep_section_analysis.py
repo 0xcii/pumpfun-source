@@ -12,6 +12,9 @@ Layer 4: Anchor IDL Recovery — instruction discriminator extraction, account
 Layer 5: Bonding Curve Math — constant product arithmetic extraction, fee
          calculation patterns, overflow protection analysis, fixed-point math
 
+Successful replacements retain the prior packet in a printed .previous-* sibling.
+Publication reuses native atomic exchange/no-replace; unsupported hosts fail closed.
+
 Usage:
     python3 scripts/deep_section_analysis.py --program pump \
         --output research/pump-section-analysis-20261028
@@ -25,13 +28,12 @@ import shutil
 import struct
 import stat
 import sys
-import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 from window_elf_reader import Elf
-from deep_disassembly import load_idl_discriminators
+from deep_disassembly import load_idl_discriminators, directory_identity, publish_packet, temporary_sibling
 
 SYSCALL_NAMES = {
     # SBPF hash_symbol_name: seed-zero MurmurHash3 x86_32 of symbol bytes.
@@ -708,35 +710,7 @@ def prepare_destination(output_dir):
                      or ((output_dir / name).exists() and not (output_dir / name).is_file()))
     if invalid:
         raise ValueError("packet entry is not a regular file: " + ", ".join(invalid))
-    return output_dir, packet_files
-
-
-def temporary_sibling(output_dir, label):
-    while True:
-        staging = output_dir.parent / (
-            f".{output_dir.name}.{label}-{os.getpid()}-{uuid.uuid4().hex}"
-        )
-        try:
-            staging.mkdir()
-        except FileExistsError:
-            continue
-        return staging
-
-
-def publish_packet(staging, output_dir):
-    backup = None
-    if output_dir.exists():
-        backup = temporary_sibling(output_dir, "previous")
-        backup.rmdir()
-        output_dir.rename(backup)
-    try:
-        staging.rename(output_dir)
-    except BaseException:
-        if backup is not None and backup.exists():
-            backup.rename(output_dir)
-        raise
-    if backup is not None:
-        shutil.rmtree(backup)
+    return output_dir, packet_files, directory_identity(output_dir)
 
 
 def build_packet(program, output_dir, output_label):
@@ -938,16 +912,17 @@ def main():
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    output_dir, _ = prepare_destination(args.output)
+    output_dir, _, expected_identity = prepare_destination(args.output)
     staging = temporary_sibling(output_dir, "staging")
     try:
         result = build_packet(args.program, staging, output_dir)
-        if result != 0:
-            return result
-        publish_packet(staging, output_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    if result != 0:
+        shutil.rmtree(staging, ignore_errors=True)
+        return result
+    publish_packet(staging, output_dir, expected_identity)
     return 0
 
 
