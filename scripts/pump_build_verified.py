@@ -283,7 +283,10 @@ def main():
                 "OBJDUMP",
                 "OBJCOPY",
                 target_flags_key,
+                "RUSTFLAGS",
+                "CARGO_ENCODED_RUSTFLAGS",
             ]
+            if k in env
         },
     }
     if cache:
