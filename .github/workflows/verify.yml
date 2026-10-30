@@ -61,6 +61,9 @@ jobs:
           - suite: admin-cto-bfi
             commands: |
               python -B reconstruction/pump-main/lanes/w12a10-cto-optoracle/test_bfi.py
+          - suite: admin-frame-diagnostics
+            commands: |
+              python -B reconstruction/pump-main/lanes/w12a02-cto-iroracle/test_diagnostics.py
           - suite: composition-patch-bytes
             commands: |
               python -B reconstruction/harness/test_integrate_failures.py
@@ -98,6 +101,7 @@ jobs:
               python -B tests/test_fees_donation_create_pinned_image.py
               python -B tests/test_fees_social_claim_pinned_image.py
               python -B tests/test_fees_donation_crank_pinned_image.py
+              python -B tests/test_create_mayhem_normal_python.py
               python -B tests/test_two_curve_optimization_guard.py
               python -O -B tests/test_two_curve_optimization_guard.py
               python -B scripts/test_dispatch_recovery.py
@@ -148,6 +152,7 @@ jobs:
               python -B scripts/test_disassemble_output_mode.py
               python -B scripts/test_disassemble_tool_binding.py
               python -B scripts/test_analyze_publication.py
+              python -B scripts/test_verify_imported_lab_publication.py
               python -B scripts/test_pump_compare_function_bytes_report.py
               python -B scripts/test_sbpf_disassembly_roundtrip_build_log.py
               python -B scripts/test_supported_sbpf_package_paths.py
