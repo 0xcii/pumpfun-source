@@ -47,3 +47,11 @@ Source binding re-reviewed at `f09c728c8520`: `scripts/deep_section_analysis.py`
 the SBPF loader's meanings; the three substituted fragments are unchanged and
 the tests still show the archived behavior and the correction on the current
 bytes.
+
+The source binding was reviewed again with the combined #2546/#2548 analyzer
+(`4b3c5cb204f8a287b5337e14932468c47713f0a0a38f274e1e46fec1e905f8c2`).
+It rejects truncated or misaligned relocation tables and uses the section's
+virtual address for strings that reach its end. The comparison predicate and
+all three relocation substitutions remain unchanged. The six math and five
+relocation successor tests pass against these combined bytes. The reader pin
+remains `5a57f32949f983fc6f9ddf40916cd04bfcd2a73b6a16cc0e9d5d6872180dac32`.
