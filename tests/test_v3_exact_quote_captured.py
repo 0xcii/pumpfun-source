@@ -23,8 +23,10 @@ import random
 import re
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from solders.account import Account
 from solders.clock import Clock
@@ -204,6 +206,21 @@ def host_line(c):
 
 
 _HOST = None
+_PROGRAM_IMAGES = None
+
+
+def program_images():
+    """Use exactly the captured bytes that passed the digest checks in every VM."""
+    global _PROGRAM_IMAGES
+    if _PROGRAM_IMAGES is None:
+        images = {}
+        for path, expected in ELF_SHA256.items():
+            data = path.read_bytes()
+            if hashlib.sha256(data).hexdigest() != expected:
+                raise ValueError(f'captured program digest mismatch: {path}')
+            images[path] = data
+        _PROGRAM_IMAGES = images
+    return _PROGRAM_IMAGES
 
 
 def host_binary():
@@ -218,6 +235,8 @@ def host_binary():
 def model(cases):
     text = ''.join(host_line(c) + '\n' for c in cases)
     out = subprocess.run([str(host_binary())], input=text, capture_output=True, text=True, check=True).stdout.splitlines()
+    if len(out) != len(cases):
+        raise ValueError(f'model returned {len(out)} answers for {len(cases)} cases')
     answers = []
     for line in out:
         if line == 'unmodelled':
@@ -245,7 +264,7 @@ def run_captured(c):
     r = roles(c)
     vm = LiteSVM().with_sigverify(True).with_transaction_history(0)
     for key, path in ((PUMP, PUMP_ELF), (TOKEN, TOKEN_ELF), (TOKEN22, TOKEN22_ELF), (ATA, ATA_ELF)):
-        vm.add_program_from_file(key, path)
+        vm.add_program(key, program_images()[path])
     vm.set_clock(Clock(100, TIMESTAMP, EPOCH, EPOCH, TIMESTAMP))
     user = USER.pubkey()
     ext = c['tf'] is not None
@@ -592,8 +611,34 @@ def random_cases(n=240, seed=20261030):
 class V3ExactQuoteCaptured(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        for path, digest in ELF_SHA256.items():
-            assert hashlib.sha256(path.read_bytes()).hexdigest() == digest, path
+        program_images()
+
+    def test_model_requires_one_answer_per_case(self):
+        case = default_case()
+        for output in ('', 'error:6020\nerror:6020\n'):
+            with self.subTest(output=output), mock.patch(__name__ + '.host_binary', return_value=Path('unused')), \
+                    mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, output)):
+                with self.assertRaisesRegex(ValueError, 'answers for 1 cases'):
+                    model([case])
+
+    def test_every_vm_uses_the_verified_program_images(self):
+        # Mutate private copies, never the retained evidence. Both VMs must
+        # still execute the bytes admitted before the concurrent replacement.
+        with tempfile.TemporaryDirectory() as temporary:
+            copies = {}
+            for index, (original, digest) in enumerate(ELF_SHA256.items()):
+                path = Path(temporary) / f'{index}.so'
+                path.write_bytes(program_images()[original])
+                copies[original] = path
+            pins = {copies[path]: digest for path, digest in ELF_SHA256.items()}
+            with mock.patch.multiple(sys.modules[__name__],
+                                     PUMP_ELF=copies[PUMP_ELF], TOKEN_ELF=copies[TOKEN_ELF],
+                                     TOKEN22_ELF=copies[TOKEN22_ELF], ATA_ELF=copies[ATA_ELF],
+                                     ELF_SHA256=pins, _PROGRAM_IMAGES=None):
+                before = run_captured(default_case())
+                PUMP_ELF.write_bytes(b'concurrently replaced program')
+                after = run_captured(default_case())
+            self.assertEqual(before, after)
 
     def run_all(self, labelled):
         answers = model([c for _, c in labelled])
