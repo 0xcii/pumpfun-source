@@ -120,9 +120,12 @@ def analyze_data_layout(elf):
                 current_start = None
 
         if len(current) >= 4:
+            # Same vaddr base as the in-loop flush above: the file-offset
+            # base (`start`) would misaddress every run that reaches the
+            # section end in a non-identity-mapped ELF.
             strings.append({
                 "offset": current_start,
-                "address": hex(start + current_start),
+                "address": hex(address_start + current_start),
                 "length": len(current),
                 "value": "".join(current)[:200],
             })
