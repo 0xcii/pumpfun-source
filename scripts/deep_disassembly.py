@@ -21,9 +21,11 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import struct
 import stat
 import sys
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -573,24 +575,13 @@ def sha256_file(path):
     return h.hexdigest()
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--program", required=True)
-    parser.add_argument("--output", required=True)
-    args = parser.parse_args()
-
-    deployed_path = REPO / "evidence" / "original" / args.program / "deployed.so"
-    if not deployed_path.exists():
-        print(f"ERROR: {deployed_path} not found")
-        return 1
-
-    output_dir = Path(args.output)
+def prepare_destination(output_dir):
+    output_dir = Path(output_dir)
     if linked(output_dir):
         raise ValueError("output directory is a link")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if linked(output_dir):
-        raise ValueError("output directory is a link")
-
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ValueError("output path is not a directory")
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
     # The manifest hashes every file here and verify.py requires exactly the
     # generated set, so reject leftovers from another run before writing.
     packet_files = {
@@ -598,7 +589,8 @@ def main():
         "extern-usage.json", "fingerprints.json", "manifest.json", "rodata-strings.json",
         "summary.json", "syscall-usage.json", "verify.py", "windows-deep.json",
     }
-    unexpected = sorted(path.name for path in output_dir.iterdir() if path.name not in packet_files)
+    existing = list(output_dir.iterdir()) if output_dir.exists() else []
+    unexpected = sorted(path.name for path in existing if path.name not in packet_files)
     if unexpected:
         raise ValueError("unexpected packet entry: " + ", ".join(unexpected))
     invalid = sorted(name for name in packet_files
@@ -606,6 +598,39 @@ def main():
                      or ((output_dir / name).exists() and not (output_dir / name).is_file()))
     if invalid:
         raise ValueError("packet entry is not a regular file: " + ", ".join(invalid))
+    return output_dir, packet_files
+
+
+def temporary_sibling(output_dir, label):
+    while True:
+        staging = output_dir.parent / (
+            f".{output_dir.name}.{label}-{os.getpid()}-{uuid.uuid4().hex}"
+        )
+        try:
+            staging.mkdir()
+        except FileExistsError:
+            continue
+        return staging
+
+
+def publish_packet(staging, output_dir):
+    backup = None
+    if output_dir.exists():
+        backup = temporary_sibling(output_dir, "previous")
+        backup.rmdir()
+        output_dir.rename(backup)
+    try:
+        staging.rename(output_dir)
+    except BaseException:
+        if backup is not None and backup.exists():
+            backup.rename(output_dir)
+        raise
+    if backup is not None:
+        shutil.rmtree(backup)
+
+
+def build_packet(program, output_dir, output_label):
+    deployed_path = REPO / "evidence" / "original" / program / "deployed.so"
 
     print(f"[disasm] Reading {deployed_path}")
     elf = Elf(deployed_path)
@@ -777,7 +802,7 @@ def main():
 
     # 9. Summary
     summary = {
-        "program": args.program,
+        "program": program,
         "deployed_sha256": hashlib.sha256(elf.b).hexdigest(),
         "text_section_bytes": elf.hi - elf.lo,
         "total_windows": len(entries),
@@ -799,10 +824,10 @@ def main():
         json.dumps(summary, indent=2) + "\n", encoding="utf-8", newline="\n")
 
     # 10. README
-    readme = f"""# {args.program} — Deep Disassembly Analysis
+    readme = f"""# {program} — Deep Disassembly Analysis
 
 ## Scope
-Full BPF instruction-level decode of the deployed {args.program} program binary,
+Full BPF instruction-level decode of the deployed {program} program binary,
 including syscall identification, error string extraction, Anchor dispatch table
 recovery, control flow graph construction, stack frame analysis, and bytecode
 fingerprinting for cross-window pattern matching.
@@ -919,7 +944,28 @@ if __name__ == "__main__":
         for name in os.listdir(output_dir)
         if (output_dir / name).is_file() and not name.endswith(".gz")
     )
-    print(f"[disasm] wrote {len(manifest) + 1} files, ~{total_lines:,} lines to {output_dir}")
+    print(f"[disasm] wrote {len(manifest) + 1} files, ~{total_lines:,} lines to {output_label}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--program", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+
+    deployed_path = REPO / "evidence" / "original" / args.program / "deployed.so"
+    if not deployed_path.exists():
+        print(f"ERROR: {deployed_path} not found")
+        return 1
+
+    output_dir, _ = prepare_destination(args.output)
+    staging = temporary_sibling(output_dir, "staging")
+    try:
+        build_packet(args.program, staging, output_dir)
+        publish_packet(staging, output_dir)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     return 0
 
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deep disassembly packets are published only into clean output directories."""
 import contextlib
+import hashlib
 import io
 import subprocess
 import sys
@@ -18,6 +19,19 @@ def generate(output):
     argv = ["deep_disassembly.py", "--program", "mayhem", "--output", str(output)]
     with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
         return deep_disassembly.main()
+
+
+def generate_program(program, output):
+    argv = ["deep_disassembly.py", "--program", program, "--output", str(output)]
+    with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
+        return deep_disassembly.main()
+
+
+def packet_hashes(output):
+    return {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in output.iterdir()
+    }
 
 
 class DeepDisassemblyPublicationTests(unittest.TestCase):
@@ -38,6 +52,51 @@ class DeepDisassemblyPublicationTests(unittest.TestCase):
             completed = subprocess.run([sys.executable, "-I", "-B", str(output / "verify.py")],
                                        capture_output=True, text=True)
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_failed_replacement_preserves_the_prior_complete_packet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "packet"
+            self.assertEqual(generate(output), 0)
+            before = packet_hashes(output)
+            real_write_text = Path.write_text
+
+            def fail_syscall_report(path, *args, **kwargs):
+                if path.name == "syscall-usage.json":
+                    raise OSError("injected packet write failure")
+                return real_write_text(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "write_text", fail_syscall_report):
+                with self.assertRaisesRegex(OSError, "injected packet write failure"):
+                    generate_program("pump_fees", output)
+
+            after = packet_hashes(output)
+            self.assertEqual(sorted(after), sorted(before))
+            changed = sorted(name for name in before if after[name] != before[name])
+            self.assertFalse(
+                changed, f"failed analysis partially replaced the prior packet: {changed}"
+            )
+            self.assertEqual(
+                sorted(path.name for path in output.parent.iterdir()),
+                ["packet"],
+                "failed analysis left a staging directory behind",
+            )
+
+    def test_failure_does_not_publish_a_new_partial_packet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "packet"
+            real_write_text = Path.write_text
+
+            def fail_syscall_report(path, *args, **kwargs):
+                if path.name == "syscall-usage.json":
+                    raise OSError("injected packet write failure")
+                return real_write_text(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "write_text", fail_syscall_report):
+                with self.assertRaisesRegex(OSError, "injected packet write failure"):
+                    generate(output)
+
+            self.assertFalse(output.exists(), "failed analysis published a partial packet")
+            self.assertEqual(list(output.parent.iterdir()), [])
 
 
 if __name__ == "__main__":
