@@ -170,11 +170,17 @@ def run_trial(source, command, destination, inputs=(), timeout=300):
                     try: os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError: pass
                     process.wait()
-        if manifest(source) != admission['source'] or manifest(copied) != admission['source'] or input_hashes(admission['inputs']) != admission['inputs']:
-            status, reason = 'error', 'source or declared input changed during execution'
+        retained = {}
+        try:
+            if manifest(source) != admission['source'] or manifest(copied) != admission['source'] or input_hashes(admission['inputs']) != admission['inputs']:
+                status, reason = 'error', 'source or declared input changed during execution'
+            retained = artifacts(attempt)
+        except (OSError, ValueError) as error:
+            # The attempt ran, so its logs and receipt must outlive a failed check.
+            status, reason = 'error', f'post-run validation failed: {error}'
         record = {'schema': 'experiment-result-v1', 'key': key, 'attempt': attempt.name,
                   'status': status, 'reason': reason, 'returncode': code, 'inputs': admission,
-                  'artifacts': artifacts(attempt), 'reused': False}
+                  'artifacts': retained, 'reused': False}
         atomic_json(receipt_path, record)
         return record
 
