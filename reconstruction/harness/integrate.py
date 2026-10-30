@@ -70,13 +70,21 @@ def make_patch(base: Path, part: Path, out: Path, tmp: Path):
                 path = root / name
                 mode = path.stat().st_mode
                 path.chmod(mode | 0o100 if executable else mode & ~0o100)
-    command = (['git', '-c', 'core.autocrlf=false', 'diff', '--no-index', '--binary',
+    git_diff = ['git', '-c', 'core.autocrlf=false', 'diff', '--no-index', '--binary',
                 '--no-ext-diff', '--no-textconv', '--no-renames', '--src-prefix=',
-                '--dst-prefix=', '--', 'a/pump', 'b/pump'] if empty_change or mode_change else
-               ['diff', '-ruN', 'a/pump', 'b/pump'])
-    d = subprocess.run(command, cwd=tmp, capture_output=True)
-    if d.returncode not in (0, 1):
-        raise subprocess.CalledProcessError(d.returncode, d.args, output=d.stdout, stderr=d.stderr)
+                '--dst-prefix=', '--', 'a/pump', 'b/pump']
+
+    def run_diff(command):
+        result = subprocess.run(command, cwd=tmp, capture_output=True)
+        if result.returncode not in (0, 1):
+            raise subprocess.CalledProcessError(result.returncode, result.args,
+                                                output=result.stdout, stderr=result.stderr)
+        return result
+
+    d = run_diff(git_diff if empty_change or mode_change else ['diff', '-ruN', 'a/pump', 'b/pump'])
+    # diff -r only names binary changes, and patch skips that line without an error.
+    if any(line.startswith(b'Binary files ') for line in d.stdout.splitlines()):
+        d = run_diff(git_diff)
     out.write_bytes(d.stdout)
     # Decode only for report metadata; patch must receive the original diff bytes.
     return d.stdout.decode('utf-8', errors='surrogateescape')
