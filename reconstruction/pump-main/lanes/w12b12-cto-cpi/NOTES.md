@@ -75,7 +75,33 @@ markers) near `holder_key`. These objects make up the +80/-48 B breaks that rema
 The same oracle was found independently by w12a02-cto-iroracle (#2772) and w12a12-cto-ctxuse (#2786). Both
 have the full slot map of the original from T 0x530 to 0x6c0. ctxuse also measured the pad and merge variants.
 
-## Round 2 (main b5975fa, after #2749 k4size): admin_cto 0.45147, 3,308 slots, 27,400 B
+## Round 2 (main b5975fa / 70f2704): admin_cto 0.45147, 3,308 slots, 27,400 B
+
+### Gain: pool-authority signer seeds as one nested literal (+0.0009 at 27,400 B, 0 losses)
+
+```rust
+// before
+let pb=[ctx.bumps.pool_authority];let poolseeds:&[&[u8]]=&[b"pool-authority",mint.as_ref(),&pb];let signer_seeds:&[&[&[u8]]]=&[poolseeds];
+// after
+let signer_seeds:&[&[&[u8]]]=&[&[b"pool-authority",mint.as_ref(),&[ctx.bumps.pool_authority]]];
+```
+
+| metric | main 70f2704 | this change |
+| --- | ---: | ---: |
+| admin_cto ratio | 0.45147 | **0.45237** |
+| admin_cto slots_diff | 3,308 | 3,308 |
+| admin_cto bytes | 27,400 | 27,400 |
+| normalized / raw | 1034 / 1034 | 1034 / 1034 |
+| losses / raw losses | | 0 / 0 |
+| admin_cto runtime differential | | 363 cases, 0 mismatches |
+| unstripped sha256 | | 9a06045fc5ac1ac7… |
+
+Mechanism: the seed stores before the sharing CPI now follow the original's order (`0x26680..0x26708` in the
+original). The bump load comes first, then the `&bump`, `&mint` and `"pool-authority"` pointer stores, then the bump byte
+store, then the signer-slice pointer, and last the lengths 1, 0x20, 0xe and 3. With separate `pb`/`poolseeds` locals,
+the bump byte was stored first and the signer slice after the lengths. Only the -16 B slot shift from
+the emit signer slice remains in this block. w10r1-admincto-cpi measured the same form (v2) on e61baa9
+(+0.0009, same size) but never landed it.
 
 PR #2776 (notes) was merged. This round continues on `swarm/w12b12-cto-cpi-2`.
 
@@ -109,3 +135,5 @@ What it shows for the emit signer slice `%_117.i74` (#41) on main 20a1ae9 IR:
 | variant | change | bytes | ratio | losses |
 | --- | --- | ---: | ---: | --- |
 | m2_shvalt | sharing CPI `val` built from the validated target (`Some(Some(t))`, t = target before the `st.creator` override) instead of `Some(new)` | 27,568 | 0.42736 | size |
+| m2_shvalt2 | the same, as `let su=(Some(Some(target)),false);` | byte-identical to m2_shvalt | | |
+| m2_seedsnested / m3_seedsnested | nested signer-seed literal (above) | 27,400 | **0.45237** | 0 / 0 |
