@@ -1,59 +1,83 @@
 #!/usr/bin/env python3
-"""scmerge.py: StackColoring merge trace for one function, named by alloca (about 5 s, no build slot).
+"""Inspect one function's StackColoring trace using an explicit debug LLVM build.
 
-  scmerge.py --ll module.ll --sym 'admin_cto7execute' [--edit edit.py] [--slot NAME ...] [--out DIR]
-
-Extracts the function with the debug build's llvm-extract (so llc runs on a 0.3 MB module, not the
-42 MB crate module), optionally applies edit(fn_module_text)->text, runs the debug llc with the
-fastbuild flags plus -debug-only=stack-coloring and prints:
-  - every StackColoring group: representative slot (frame index, size, IR name) and its members;
-  - for each --slot NAME: the group it ended in, and whether it is a representative.
-The extracted module compiles to the same bytes as the full module (checked on admin_cto at main
-20a1ae9: SDK llc 27,400 B, identical disassembly to the debug llc).
-Use it to test which IR shape lets one alloca merge into another (for example the wallet emit_cpi!
-signer slice %_117.i74 into a 24 B target piece), before looking for the source form.
+The output directory must be new. This is an IR experiment, not evidence that a
+source candidate matches the deployed program. No input is modified.
 """
-import argparse, os, re, runpy, subprocess, sys, tempfile
+import argparse
 from collections import defaultdict
-DBG = os.path.expanduser('~/.cache/pumpfun-reconstruction/llvm-dbg/build/bin')
-FLAGS = ['-O3', '-relocation-model=pic', '-mattr=+store-imm,+jmp-ext']
+import hashlib
+import json
+from pathlib import Path
+import re
+import runpy
+import subprocess
+
+
+def parse_trace(log):
+    names = {int(i): name for i, name in re.findall(r'slot #(\d+) with allocation: (\S+)', log)}
+    sizes = {int(i): int(size) for i, size in re.findall(r'^Slot #(\d+) - (\d+) bytes\.', log, re.M)}
+    if not names or set(names) - set(sizes):
+        raise ValueError('missing complete StackColoring allocation diagnostics')
+    parent = {index: index for index in names}
+    def root(index):
+        if index not in parent:
+            raise ValueError('merge references an unknown allocation')
+        while parent[index] != index:
+            index = parent[index]
+        return index
+    for left, right in re.findall(r'Merging #(\d+) and slots #(\d+) together', log):
+        left, right = root(int(left)), root(int(right))
+        if left != right:
+            parent[right] = left
+    groups = defaultdict(list)
+    for index in names:
+        groups[root(index)].append(index)
+    return [{'representative': index, 'name': names[index], 'bytes': sizes[index],
+             'members': [{'slot': member, 'name': names[member], 'bytes': sizes[member]}
+                         for member in sorted(members)]}
+            for index, members in sorted(groups.items())]
+
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--ll', required=True); ap.add_argument('--sym', required=True)
-    ap.add_argument('--edit'); ap.add_argument('--slot', action='append', default=[])
-    ap.add_argument('--out', default=tempfile.mkdtemp(prefix='scmerge-'))
-    a = ap.parse_args()
-    os.makedirs(a.out, exist_ok=True)
-    m = re.search(r'define [^\n]*@(\S*' + a.sym + r'\S*)\(', open(a.ll).read())
-    if not m: sys.exit('no function matching ' + a.sym)
-    sym = m.group(1)
-    ext = os.path.join(a.out, 'fn.ll')
-    subprocess.run([DBG + '/llvm-extract', '-S', '-func=' + sym, a.ll, '-o', ext], check=True)
-    if a.edit:
-        t = open(ext).read(); t2 = runpy.run_path(a.edit)['edit'](t)
-        if t2 == t: sys.exit('edit changed nothing')
-        open(ext, 'w').write(t2)
-    r = subprocess.run([DBG + '/llc'] + FLAGS + [ext, '-filetype=obj', '-o', os.path.join(a.out, 'fn.o'),
-                        '-debug-only=stack-coloring'], capture_output=True, text=True)
-    log = r.stderr; open(os.path.join(a.out, 'sc.log'), 'w').write(log)
-    if r.returncode: sys.exit(log[-2000:])
-    name = {}
-    for x in re.finditer(r'slot #(\d+) with allocation: (\S+)', log): name[int(x.group(1))] = x.group(2)
-    size = {int(x.group(1)): int(x.group(2)) for x in re.finditer(r'^Slot #(\d+) - (\d+) bytes\.', log, re.M)}
-    rep, members = {}, defaultdict(list)
-    for x in re.finditer(r'Merging #(\d+) and slots #(\d+) together', log):
-        i, j = int(x.group(1)), int(x.group(2)); rep[j] = i; members[i].append(j)
-    groups = sorted(members, key=lambda i: (-size.get(i, 0), i))
-    for i in groups:
-        print(f'#{i:<4d} {size.get(i,0):5d} B {name.get(i,"?"):24s} <- ' +
-              ' '.join(f'{name.get(j,"?")}#{j}/{size.get(j,0)}' for j in members[i]))
-    for s in a.slot:
-        ids = [k for k, v in name.items() if v == s]
-        for k in ids:
-            print(f'slot {s} #{k} ({size.get(k,0)} B): ' + (f'merged into #{rep[k]} {name.get(rep[k],"?")}' if k in rep
-                  else ('representative of ' + str(len(members.get(k, []))) + ' members' if k in members else 'alone')))
-    print('trace:', os.path.join(a.out, 'sc.log'))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--ll', required=True, type=Path)
+    parser.add_argument('--sym', required=True)
+    parser.add_argument('--llvm-bin', required=True, type=Path)
+    parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--edit', type=Path)
+    parser.add_argument('--slot', action='append', default=[])
+    args = parser.parse_args()
+    source = args.ll.read_bytes(); text = source.decode('utf-8')
+    matches = re.findall(r'define [^\n]*@(\S*' + args.sym + r'\S*)\(', text)
+    if len(matches) != 1:
+        parser.error(f'function pattern matched {len(matches)} definitions; require one')
+    args.out.mkdir(parents=True, exist_ok=False)
+    source_copy = args.out/'input.ll'; source_copy.write_bytes(source)
+    extracted = args.out/'fn.ll'
+    extract = args.llvm_bin/'llvm-extract'; llc = args.llvm_bin/'llc'
+    subprocess.run([str(extract), '-S', '-func=' + matches[0], str(source_copy), '-o', str(extracted)], check=True)
+    if args.edit:
+        before = extracted.read_text(encoding='utf-8')
+        after = runpy.run_path(str(args.edit))['edit'](before)
+        if not isinstance(after, str) or after == before:
+            raise ValueError('edit must return changed IR text')
+        extracted.write_text(after, encoding='utf-8')
+    result = subprocess.run([str(llc), '-O3', '-relocation-model=pic', '-mattr=+store-imm,+jmp-ext',
+                             str(extracted), '-filetype=obj', '-o', str(args.out/'fn.o'),
+                             '-debug-only=stack-coloring'], capture_output=True, text=True)
+    (args.out/'sc.log').write_text(result.stderr, encoding='utf-8')
+    result.check_returncode()
+    groups = parse_trace(result.stderr)
+    present = {member['name'] for group in groups for member in group['members']}
+    if set(args.slot) - present:
+        raise ValueError('requested allocation not present in trace')
+    report = {'input_sha256': hashlib.sha256(source).hexdigest(),
+              'llvm_extract_sha256': hashlib.sha256(extract.read_bytes()).hexdigest(),
+              'llc_sha256': hashlib.sha256(llc.read_bytes()).hexdigest(),
+              'function': matches[0], 'groups': groups,
+              'selected': [group for group in groups if any(m['name'] in args.slot for m in group['members'])]}
+    (args.out/'report.json').write_text(json.dumps(report, indent=2)+'\n', encoding='utf-8')
+    print(json.dumps(report, indent=2))
 
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__': main()
