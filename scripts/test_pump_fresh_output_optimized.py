@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -71,6 +72,21 @@ class PumpFreshOutputOptimizedTests(unittest.TestCase):
             self.assertNotEqual(completed.returncode, 0)
             self.assertIn(ERROR, completed.stderr)
             self.assertTrue(output.is_symlink())
+
+    def test_output_created_while_cases_run_is_not_replaced(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import pump_virtual_reserve_differential as differential
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); candidate = root/'candidate.so'; candidate.write_bytes(b'candidate')
+            output = root/'racing-report.json'
+            def cases():
+                output.write_bytes(b'report from another writer')
+                return []
+            with mock.patch.object(sys, 'argv', ['test', '--candidate', str(candidate), '--output', str(output)]), \
+                    mock.patch.object(differential, 'cases', cases):
+                with self.assertRaises(FileExistsError):
+                    differential.main()
+            self.assertEqual(output.read_bytes(), b'report from another writer')
 
 
 if __name__ == "__main__":

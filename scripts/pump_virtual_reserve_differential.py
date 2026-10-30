@@ -152,7 +152,8 @@ def main():
               'inputs_sha256': inputs, 'compiled_source_sha256': build['source_sha256'] if build else None,
               'case_count': len(rows), 'mismatches': [r['case']['name'] for r in rows if r['differences']], 'cases': rows}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_bytes(gzip.compress(json.dumps(report, separators=(',',':')).encode(),mtime=0))
+    with args.output.open('xb') as stream:
+        stream.write(gzip.compress(json.dumps(report, separators=(',',':')).encode(),mtime=0))
     print(json.dumps({'cases':len(rows), 'mismatches':report['mismatches']}))
     if report['mismatches']:raise SystemExit(1)
 
