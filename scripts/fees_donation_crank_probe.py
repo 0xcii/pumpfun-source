@@ -2,6 +2,9 @@
 """Read original crank behavior using test-owned payer and synthetic offline state."""
 import argparse,struct
 from fees_donation_create_differential import *
+import sys
+sys.path.insert(0,str(ROOT/'scripts'))
+from pump_amm_reusable_harness import pin_program
 from solders.compute_budget import set_compute_unit_limit
 from solders.clock import Clock
 RELAY=Pubkey.from_string('RLAYHr9TRFcKB2ubYQhspcnXiaGpaVzNQvHytt47RZu')
@@ -83,14 +86,14 @@ def main():
  cases += [{'name':'poor-payer-'+str(n),'payer_lamports':n} for n in [0,1,2039280,2039281,4000000,8000000]]
  for offset,label,value in [(0,'mint',bytes(32)),(32,'authority',bytes(32)),(108,'uninitialized',bytes([0])),(108,'frozen',bytes([2]))]:cases.append({'name':'ata-'+label,'token_amount':1,'token_patches':[(offset,value.hex())]})
  cases += [{'name':'ata-owner','token_amount':1,'token_owner':str(PROGRAM)},{'name':'ata-unsynced','token_amount':0,'amount':0,'unsynced':12345},{'name':'quote-and-disable','flags':8,'state_patches':[(74,'00')]},{'name':'zero-no-whitelist','amount':0,'whitelist':False}]
- rows=[];failures=[];candidate=CrankFixture(a.candidate) if a.candidate else None
+ rows=[];failures=[];candidate=CrankFixture(pin_program(a.candidate)) if a.candidate else None
  for c in cases:
   x=f.run(c);y=candidate.run(c) if candidate else None
   keys=['error','before','after','inner']
   match=all(x[k]==y[k] for k in keys) and [l for l in x['logs'] if l.startswith('Program data:')]==[l for l in y['logs'] if l.startswith('Program data:')] if y else None
   rows.append({'case':c,'original':x,'candidate':y,'match':match})
   if match is False:failures.append(c['name'])
- report={'scope':'Signed synthetic offline crank fixtures; no full-program byte identity claim.','original_sha256':hashlib.sha256((ROOT/'evidence/original/pump_fees/deployed.so').read_bytes()).hexdigest(),'candidate_sha256':hashlib.sha256(a.candidate.read_bytes()).hexdigest() if a.candidate else None,'cases':rows,'mismatches':failures}
+ report={'scope':'Signed synthetic offline crank fixtures; no full-program byte identity claim.','original_sha256':hashlib.sha256((ROOT/'evidence/original/pump_fees/deployed.so').read_bytes()).hexdigest(),'candidate_sha256':hashlib.sha256(pin_program(a.candidate).read_bytes()).hexdigest() if a.candidate else None,'cases':rows,'mismatches':failures}
  a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text(json.dumps(report,indent=2)+'\n')
  print('Cases',len(rows),'mismatches',failures)
  if failures:raise SystemExit(1)
