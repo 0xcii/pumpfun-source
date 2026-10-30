@@ -6,15 +6,16 @@ the lane, and the frame findings below carry over (k4size changed code, not the 
 Builds and scratch: `~/.cache/pumpfun-reconstruction/lanes/w12a05-cto-framemir/` (not in git).
 Ledger approach `frame-mir-*`, keys `0x22a10-w12-20a1ae9-framemir-*-v1`.
 
-## Tools (this directory)
+## Retained diagnostics
 
-| tool | use |
-| --- | --- |
-| `tools/capmir.py <crate_copy> <work> <out>` | identity-recipe build of an experiment copy with `--emit=link,llvm-ir,mir`; copies `pump_recovered.{ll,mir}` to `<out>` (candidate.so equals a plain build) |
-| `tools/framesim.py <fo_dir> [ops]` | frame what-if **with the ratio it would give**: re-lays-out the surviving frame objects of a `frameoracle.py` run (`mv:FI:BEFORE`, `sz:FI:SIZE[:AL]`, `ins:BEFORE:SIZE[:AL]`, `del:FI[:INTO]`), remaps every r10 access of our own code object-relative, prints the masked-exact ratio (= target_metric ratio on main) |
-| `tools/r10.py orig\|<so> LO HI` | every instruction of the window touching `[r10-T]`, LO<=T<=HI (incl. `mov rX,r10; add rX,-T`) |
-| `tools/nosc_rows.py <fo_dir>` | per-alloca implied original T from frameoracle's `-no-stack-coloring` run (all rows, not just confident ones) |
-| `tools/dis.py <so>` | disassembly of a candidate's `admin_cto::execute` |
+- `tools/dis.py <unstripped.so> [symbol regex]` prints the selected function.
+- `tools/r10.py orig|<unstripped.so> LO HI` prints decoded frame accesses.
+- `tools/layout_probe.rs` models tuple and Result layouts with synthetic Pubkey/error
+  types. It is a host compiler experiment, not a probe of actual Anchor types or the
+  SBF ABI. Its offsets suggest source experiments; they do not prove original types.
+
+Private capture, mutation, remapping and build runners are omitted. The broad
+frame-remapping bounds are already retained in the w12a02-cto-iroracle packet.
 
 ## The 56-byte first-spill gap is two things
 
@@ -58,21 +59,10 @@ MIR facts behind the "ours" column (main 20a1ae9, `--emit=mir`):
 - The original's `target` copies are split 8/24 instead (`[0,8)` in a register, `[8,32)` in memory: X24 and the
   `[r10-0x530]` piece), so its execute-level target is not a plain copy of a `Result<Pubkey>` payload.
 
-## What-if bounds (`framesim.py`, our own code remapped, no build)
-
-| what-if on main 20a1ae9 | ratio |
-| --- | ---: |
-| none | 0.43919 |
-| signer slice moved into a 24 B slot just above holder_key (`sz:41:24 mv:41:144`) | 0.45506 |
-| full original alloca order through mint (P1/P2/target before `_184`, new-copy 7/9 + X24 before holder_key) | 0.49371 |
-| every r10 offset remapped to its aligned original offset (incl. spills; `w3-adminCTO/scripts/remap.py`) | 0.5707 |
-
-(w12b12-cto-cpi's IR oracle moves `_117.i74` without growing it and gets 0.48892 for that alone.)
-
 ## Which Rust shapes give the original's 8/24 target split
 
-Measured on the pinned rustc 1.79 (host target, same layout code; `tools/layout_probe.rs`, run with `RUSTC_BOOTSTRAP=1 ~/.cache/solana/v1.44/platform-tools/rust/bin/rustc -O tools/layout_probe.rs`): offset of
-the Pubkey and of the `Error` inside `Result<T, anchor Error>`.
+Modeled with the pinned rustc 1.79 host compiler (synthetic types; `tools/layout_probe.rs`, run with `RUSTC_BOOTSTRAP=1 ~/.cache/solana/v1.44/platform-tools/rust/bin/rustc -O tools/layout_probe.rs`): offset of
+the modeled Pubkey and error inside `Result<T, E>`. Actual Anchor and SBF layouts require separate validation.
 
 | `T` | Pubkey at | Error at | Pubkey bytes overlapped |
 | --- | ---: | --- | --- |
@@ -83,20 +73,9 @@ the Pubkey and of the `Error` inside `Result<T, anchor Error>`.
 | `(bool,bool,Pubkey,Option<Option<Pubkey>>,bool)` (main's block tuple) | 36 | [8,24) | none |
 | `(Pubkey,u64)`, `(u64,Pubkey,bool)`, `(Pubkey,usize)` | 8 or 0 | | [0,16) |
 
-So the original's target most likely travels through a `Result`/`ControlFlow` whose Ok payload is 8-aligned
+One hypothesis to test is that the original target travels through a `Result`/`ControlFlow` whose Ok payload is 8-aligned
 with the Pubkey at payload offset 16 (an `Option<u64>` such as `fee` placed first), e.g. a validation closure or
 helper returning the block tuple plus `fee` with `?`.
-
-## Trials (main 20a1ae9, `capmir.py` builds; target_metric on the unstripped output)
-
-| trial | change | bytes | ratio | frame result |
-| --- | --- | ---: | ---: | --- |
-| va1 | deferred-init outer locals `let (holder,cashback,mut target,sharing_update,collect_old);{..}` | 27,368 | 0.26589 | outer target becomes 7/9 pieces (like the orig's 0x658/0x668 pair) but still without lifetime markers; `target.sroa.0` disappears, so the wallet bump `_124.i` becomes a standalone 1 B slot and the whole top of the frame moves by -8 (r10-equal 670 -> 37) |
-| h3a/h3b | `validate` returns `Result<(Pubkey,Option<u64>)>` (fee carried out / ignored; identical bytes) | 27,760 | 0.19908 | 16/16 split (Pubkey at offset 0, see table) |
-| h4a | validation block as an immediately called closure returning `Result<(bool,bool,Pubkey,Option<u64>,Option<Option<Pubkey>>,bool)>` with `?` | 27,808 | 0.37877 | the outer `target` (32 B) and outer `sharing_update` 7/9 pieces move **in front of `_184`** (frame-index order of the original's target/P2), the closure's `sharing_update` 7 B piece aligns with orig P1a (0x538, 2/2 votes), the closure result `_26` 7/9 pieces align with orig P2 (0x550/0x560, 2/2), `target` with orig 0x580 (5/6), and the wallet bump is hosted by the closure's 9 B target piece like orig P1b; abstracted ratio 0.6465 -> 0.5809 (+408 B of code) |
-
-h4a is the first shape that reproduces the original's frame-index order for the target/sharing pieces; it is
-too large and changes too much code to land. The signer slice is still standalone in h4a (no 24 B X24).
 
 ## Next ideas
 

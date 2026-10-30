@@ -14,7 +14,7 @@ else:
     from pathlib import Path
     cs=Path(which).read_bytes(); secs=score.sections(cs)
     f=next(x for x in score.candidate_functions(Path(which)) if re.search(r'admin_cto7execute',x[2]))
-    raw=score.body(cs,secs,f[0],f[1]); base=0x22a10
+    raw=score.body(cs,secs,f[0],f[1]); base=f[0]
 i=0; last_mov={}
 out=[]
 while i<len(raw):
