@@ -89,3 +89,21 @@ old_fee_first, su_iflet_match, amm_cb_local, k4_oldfee_after, v326_match, a2_ori
 | A4 = A3 + a2_orig_order, minus `bump_before_old` | `ev_flags_local` | **27,400 / 0.48652** | this PR |
 
 Every variant is a ledger row (approach `mutation-hillclimb`, key `0x22a10-w12-20a1ae9-hc-<sha12>-v1`).
+
+## Review on the current nested-seed baseline
+
+The current main source includes #2808's nested pool-authority signer seeds.
+Keeping that change with this candidate gives **27,400 bytes, ratio 0.48742,
+3,273 differing slots**, with 154 internal calls and 3 syscalls. The fresh
+identity build preserves all **1,034/1,035 normalized and raw matches**, with
+zero missing, resized or lost windows. This remains a partial admin-window
+improvement; it adds no complete matched window.
+
+The selected source digest is
+`4b5048e59f11c029ba17f6bad4cc8f3eea784e212105a3cce272826521193428`;
+the unstripped ELF digest is
+`481ba72865f36b52b3cc27e824ef3762a0baff5509c48135aa627fb927418c2b`.
+The candidate passes 363 signed synthetic admin-CTO differential cases against
+the captured original. These fixtures are bounded runtime evidence, not a
+whole-program equivalence proof. All 20 error/require/message macro sites keep
+their previous source line numbers.
