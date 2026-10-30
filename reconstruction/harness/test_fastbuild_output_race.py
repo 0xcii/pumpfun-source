@@ -68,7 +68,7 @@ class OutputRaceTests(unittest.TestCase):
 
             def delayed(command, **kwargs):
                 result = real(command, **kwargs)
-                if Path(kwargs['cwd']) == work_a / 'ws':
+                if Path(kwargs['cwd']).resolve() == (work_a / 'ws').resolve():
                     ready.set()
                     if not release.wait(30):
                         raise RuntimeError('test publication barrier timed out')
