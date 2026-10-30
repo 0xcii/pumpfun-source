@@ -21,9 +21,11 @@ import collections
 import hashlib
 import json
 import os
+import shutil
 import struct
 import stat
 import sys
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -682,23 +684,13 @@ def analyze_math_patterns(elf):
 # Main
 # ──────────────────────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--program", required=True)
-    parser.add_argument("--output", required=True)
-    args = parser.parse_args()
-
-    deployed_path = REPO / "evidence" / "original" / args.program / "deployed.so"
-    if not deployed_path.exists():
-        print(f"ERROR: {deployed_path} not found")
-        return 1
-
-    output_dir = Path(args.output)
+def prepare_destination(output_dir):
+    output_dir = Path(output_dir)
     if linked(output_dir):
         raise ValueError("output directory is a link")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if linked(output_dir):
-        raise ValueError("output directory is a link")
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ValueError("output path is not a directory")
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
 
     # The manifest hashes every file here and verify.py requires exactly the
     # generated set, so reject leftovers from another run before writing.
@@ -707,7 +699,8 @@ def main():
         "layer3-cross-section.json", "layer4-anchor-idl.json", "layer5-math-analysis.json",
         "manifest.json", "summary.json", "verify.py",
     }
-    unexpected = sorted(path.name for path in output_dir.iterdir() if path.name not in packet_files)
+    existing = list(output_dir.iterdir()) if output_dir.exists() else []
+    unexpected = sorted(path.name for path in existing if path.name not in packet_files)
     if unexpected:
         raise ValueError("unexpected packet entry: " + ", ".join(unexpected))
     invalid = sorted(name for name in packet_files
@@ -715,6 +708,42 @@ def main():
                      or ((output_dir / name).exists() and not (output_dir / name).is_file()))
     if invalid:
         raise ValueError("packet entry is not a regular file: " + ", ".join(invalid))
+    return output_dir, packet_files
+
+
+def temporary_sibling(output_dir, label):
+    while True:
+        staging = output_dir.parent / (
+            f".{output_dir.name}.{label}-{os.getpid()}-{uuid.uuid4().hex}"
+        )
+        try:
+            staging.mkdir()
+        except FileExistsError:
+            continue
+        return staging
+
+
+def publish_packet(staging, output_dir):
+    backup = None
+    if output_dir.exists():
+        backup = temporary_sibling(output_dir, "previous")
+        backup.rmdir()
+        output_dir.rename(backup)
+    try:
+        staging.rename(output_dir)
+    except BaseException:
+        if backup is not None and backup.exists():
+            backup.rename(output_dir)
+        raise
+    if backup is not None:
+        shutil.rmtree(backup)
+
+
+def build_packet(program, output_dir, output_label):
+    deployed_path = REPO / "evidence" / "original" / program / "deployed.so"
+    if not deployed_path.exists():
+        print(f"ERROR: {deployed_path} not found")
+        return 1
 
     print(f"[deep] Reading {deployed_path}")
     elf = Elf(deployed_path)
@@ -755,7 +784,7 @@ def main():
     # Summary
     text_bytes = elf.hi - elf.lo
     summary = {
-        "program": args.program,
+        "program": program,
         "deployed_sha256": sha256_bytes(elf.b),
         "text_bytes": text_bytes,
         "layer1_data_layout": {
@@ -794,10 +823,10 @@ def main():
     l3 = summary["layer3_cross_section"]
     l4 = summary["layer4_anchor_idl"]
     l5 = summary["layer5_math"]
-    readme = f"""# {args.program} — 5-Layer Deep Section Analysis
+    readme = f"""# {program} — 5-Layer Deep Section Analysis
 
 ## Scope
-Comprehensive cross-section analysis of the deployed {args.program} binary,
+Comprehensive cross-section analysis of the deployed {program} binary,
 covering data layout, relocations, data dependencies, Anchor IDL recovery,
 and mathematical pattern extraction.
 
@@ -899,7 +928,26 @@ if __name__ == "__main__": sys.exit(main())
         sum(1 for _ in open(output_dir / name, encoding="utf-8"))
         for name in os.listdir(output_dir) if (output_dir / name).is_file()
     )
-    print(f"[deep] wrote {len(manifest)+1} files, ~{total_lines:,} lines to {output_dir}")
+    print(f"[deep] wrote {len(manifest)+1} files, ~{total_lines:,} lines to {output_label}")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--program", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+
+    output_dir, _ = prepare_destination(args.output)
+    staging = temporary_sibling(output_dir, "staging")
+    try:
+        result = build_packet(args.program, staging, output_dir)
+        if result != 0:
+            return result
+        publish_packet(staging, output_dir)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     return 0
 
 
