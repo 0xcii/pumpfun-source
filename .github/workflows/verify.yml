@@ -58,6 +58,9 @@ jobs:
           - suite: admin-cto-stack-coloring
             commands: |
               python -B reconstruction/pump-main/lanes/w12b12-cto-cpi/test_scmerge.py
+          - suite: admin-cto-bfi
+            commands: |
+              python -B reconstruction/pump-main/lanes/w12a10-cto-optoracle/test_bfi.py
           - suite: composition-patch-bytes
             commands: |
               python -B reconstruction/harness/test_integrate_failures.py
