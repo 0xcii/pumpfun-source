@@ -61,6 +61,9 @@ jobs:
           - suite: admin-cto-bfi
             commands: |
               python -B reconstruction/pump-main/lanes/w12a10-cto-optoracle/test_bfi.py
+          - suite: admin-frame-diagnostics
+            commands: |
+              python -B reconstruction/pump-main/lanes/w12a02-cto-iroracle/test_diagnostics.py
           - suite: composition-patch-bytes
             commands: |
               python -B reconstruction/harness/test_integrate_failures.py
