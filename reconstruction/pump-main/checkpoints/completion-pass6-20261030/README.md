@@ -30,6 +30,8 @@ counts retain their [existing provenance](../completion-20261030/other-programs.
 - [baseline-score.json.gz](baseline-score.json.gz) and [score.json.gz](score.json.gz)
   retain the complete official window inventories.
 - [source-inputs.json](source-inputs.json) binds the tested Pump source.
+- Build/scoring tool hashes refer to baseline revision `319a7d10f`, used for
+  these builds; the later warm-cache portability fix leaves its macOS command unchanged.
 - The candidate passed **363/363** signed synthetic admin-CTO differential
   cases against the captured original with genuine dependency CPIs. These
   fixtures do not establish general runtime or whole-program identity.

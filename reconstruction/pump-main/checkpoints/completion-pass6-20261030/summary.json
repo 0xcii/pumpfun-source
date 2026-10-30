@@ -106,5 +106,6 @@
     "The first merge with the superseded main state layout lost 686 raw matches; the repaired source restores the stronger original-size layout and has zero losses.",
     "The other four program counts are retained from ../completion-20261030/other-programs.json.",
     "Partial window similarity and synthetic runtime checks do not establish whole-program identity."
-  ]
+  ],
+  "build_and_scoring_tool_revision": "319a7d10f68b9d45ac812332133a45ba9264c8a0"
 }
