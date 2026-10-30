@@ -1,17 +1,34 @@
 #!/usr/bin/env python3
 """A failed probe report write must retain the previous complete report."""
 import subprocess
+import os
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPTS))
+import probe_report  # noqa: E402
 
 
 class ProbeReportAtomicityTests(unittest.TestCase):
+    def test_failed_replacement_preserves_prior_report(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            report = Path(temporary) / "report.json"
+            prior = b'{"prior": "complete"}\n'
+            report.write_bytes(prior)
+            with mock.patch.object(probe_report.os, "replace",
+                                   side_effect=OSError("replacement failed")):
+                with self.assertRaisesRegex(OSError, "replacement failed"):
+                    probe_report.write_json_report(report, {"new": "complete"})
+            self.assertEqual(report.read_bytes(), prior)
+            self.assertEqual(list(report.parent.glob(".report.json.*")), [])
+
+    @unittest.skipUnless(os.name == "posix", "RLIMIT_FSIZE requires POSIX")
     def test_file_size_failure_preserves_prior_report(self):
         with tempfile.TemporaryDirectory() as temporary:
             report = Path(temporary) / "report.json"
