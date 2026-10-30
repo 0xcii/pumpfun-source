@@ -57,7 +57,7 @@ class OrigSourceTests(unittest.TestCase):
     def test_patch_backups_are_still_removed(self):
         lines = [b'line %d\n' % number for number in range(1, 20)]
         base = self.crate('base', b''.join(lines))
-        # Shifted context makes patch apply with an offset and write a .orig backup.
+        # Shifted context would ordinarily make patch write a .orig backup.
         changed = list(lines)
         changed[9] = b'changed\n'
         part = self.crate('part', b''.join(changed))
@@ -72,6 +72,31 @@ class OrigSourceTests(unittest.TestCase):
         self.assertIn(b'changed\n', (composed / 'src/lib.rs').read_bytes())
         self.assertEqual(sorted(path.relative_to(composed).as_posix() for path in composed.rglob('*.orig')),
                          ['vendor/dep/Cargo.toml.orig'])
+
+    def test_offset_patch_cannot_overwrite_an_existing_source_backup_name(self):
+        lines = [b'line %d\n' % number for number in range(1, 20)]
+        base = self.crate('base', b''.join(lines))
+        changed = list(lines); changed[9] = b'changed\n'
+        part = self.crate('part', b''.join(changed))
+        shifted = self.crate('shifted', b'first\nsecond\n' + b''.join(lines))
+        (shifted/'src/lib.rs.orig').write_bytes(b'real source\n')
+        result = subprocess.run(
+            [sys.executable, '-B', str(self.tool), '--name', 'test', '--base-src', str(shifted),
+             '--part', f'part={part}', '--base-of', f'part={base}', '--no-build'],
+            cwd=self.root, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        composed = self.root/'reconstruction/integ/test/src'
+        self.assertEqual((composed/'src/lib.rs.orig').read_bytes(), b'real source\n')
+        self.assertIn(b'changed\n', (composed/'src/lib.rs').read_bytes())
+
+    def test_part_can_add_and_change_source_files_named_orig(self):
+        base = self.crate('base', b'unchanged\n')
+        part = self.crate('part', b'unchanged\n')
+        (part/'vendor/dep/Cargo.toml.orig').write_bytes(b'changed source\n')
+        (part/'src/new.orig').write_bytes(b'new source\n')
+        composed = self.compose(base, part)
+        self.assertEqual((composed/'vendor/dep/Cargo.toml.orig').read_bytes(), b'changed source\n')
+        self.assertEqual((composed/'src/new.orig').read_bytes(), b'new source\n')
 
 
 if __name__ == '__main__':

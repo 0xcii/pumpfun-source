@@ -46,7 +46,7 @@ def make_patch(base: Path, part: Path, out: Path, tmp: Path):
     if tmp.exists():
         shutil.rmtree(tmp)
     (tmp / 'a').mkdir(parents=True); (tmp / 'b').mkdir(parents=True)
-    patterns = ('*.orig', '*.rej', '.DS_Store')
+    patterns = ('*.rej', '.DS_Store')
     shutil.copytree(base, tmp / 'a/pump', ignore=crate_ignore(base, *patterns))
     shutil.copytree(part, tmp / 'b/pump', ignore=crate_ignore(part, *patterns))
     trees = [{p.relative_to(root): p.stat().st_size == 0
@@ -203,7 +203,8 @@ def main():
     report = {'name': a.name, 'base': str(a.base_src), 'parts': []}
     exit_code = 0
     # GNU patch on Windows otherwise strips CR bytes from patch/source input.
-    patch_command = ['patch'] + (['--binary'] if sys.platform == 'win32' else [])
+    # Disable mismatch backups rather than deleting *.orig, which can be source.
+    patch_command = ['patch', '-V', 'none'] + (['--binary'] if sys.platform == 'win32' else [])
     for label, path, derived_from in parts:
         pf = out / 'parts' / f'{label}.patch'
         text = make_patch(derived_from, Path(path), pf, SC / 'integ' / '.tmp' / a.name / label)
@@ -217,17 +218,12 @@ def main():
         else:
             dry = subprocess.run(patch_command + ['-p2', '--forward', '--dry-run', '-E', '-d', str(src), '-i', str(pf)], capture_output=True, text=True)
         if dry.returncode == 0:
-            # patch leaves a .orig backup after an offset hunk. Source can carry
-            # that name too, such as a vendored Cargo.toml.orig, so only new ones go.
-            sources = set(src.rglob('*.orig'))
             if git_format:
                 subprocess.run(command + [str(pf)], cwd=patch_root, check=True)
                 files = git_patched_files(command, patch_root, directory, pf)
             else:
                 subprocess.run(patch_command + ['-s', '-p2', '--forward', '-E', '-d', str(src), '-i', str(pf)], check=True)
                 files = patched_files(text)
-            for o in set(src.rglob('*.orig')) - sources:
-                o.unlink()
             report['parts'].append({'label': label, 'status': 'applied', 'files': files})
         else:
             (out / 'rejects' / f'{label}.txt').write_text(dry.stdout + dry.stderr)
