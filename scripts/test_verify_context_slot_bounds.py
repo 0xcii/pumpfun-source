@@ -26,6 +26,13 @@ class EvidenceContextSlotTests(unittest.TestCase):
                 legacy.write_text(json.dumps(boundary), encoding='utf-8')
                 verify_evidence.main()
                 legacy.write_bytes(unchanged)
+                upgradeable = root / 'evidence/original/pump/capture.json'
+                unchanged_upgradeable = upgradeable.read_bytes()
+                boundary = json.loads(unchanged_upgradeable)
+                boundary['context_slots'] = [boundary['last_deploy_slot'], 2**64 - 1, 2**64 - 1, 2**64 - 1]
+                upgradeable.write_text(json.dumps(boundary), encoding='utf-8')
+                verify_evidence.main()
+                upgradeable.write_bytes(unchanged_upgradeable)
                 for relative, bad_values in (
                     ('evidence/dependencies/associated_token/capture.json', [[-2, -1], [2**64, 2**64]]),
                     ('evidence/original/pump/capture.json', [[2**64] * 4]),
