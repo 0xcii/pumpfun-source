@@ -585,6 +585,7 @@ python3 verify.py
 import hashlib, json, os, sys
 
 PACKET = os.path.dirname(os.path.abspath(__file__))
+REQUIRED_FILES = frozenset(__REQUIRED_PACKET_FILES__)
 
 def sha256_file(path):
     h = hashlib.sha256()
@@ -595,6 +596,8 @@ def sha256_file(path):
 
 def main():
     manifest = json.load(open(os.path.join(PACKET, "manifest.json")))
+    if not isinstance(manifest, dict) or not REQUIRED_FILES.issubset(manifest):
+        print("FAIL: manifest omits required roadmap artifacts"); return 1
     errors = 0
     for name, expected in manifest.items():
         path = os.path.join(PACKET, name)
@@ -622,6 +625,10 @@ def main():
 if __name__ == "__main__":
     sys.exit(main())
 '''
+    verify_py = verify_py.replace('__REQUIRED_PACKET_FILES__', repr([
+        'README.md', 'summary.json', 'reconstruction-plan.json', 'verify.py',
+        *[f'{program}-details.json' for program in all_program_data],
+    ]))
     (output_dir / "verify.py").write_text(verify_py)
 
     # 6. Manifest
