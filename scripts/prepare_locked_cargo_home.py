@@ -18,11 +18,14 @@ raw_lock = args.lockfile.read_bytes()
 lock = tomllib.loads(raw_lock.decode())
 # Output namespaces and registry configuration below are specific to crates.io.
 # Reject other registries before creating a partial or mislabeled cache.
+registry_packages = {}
 for package in lock['package']:
     registry_source = package.get('source', '')
     if (registry_source.startswith('registry+') and
             registry_source != 'registry+https://github.com/rust-lang/crates.io-index'):
         parser.error('Unsupported registry source; this helper only prepares crates.io packages')
+    if registry_source.startswith('registry+'):
+        registry_packages.setdefault(package['name'], []).append(package)
 namespaces = ['index.crates.io-6f17d22bba15001f', 'index.crates.io-1949cf8c6b5b557f']
 sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -49,6 +52,15 @@ def index_records(path):
         if isinstance(record, dict):
             yield record
 
+
+def supplies_locked_versions(path, name):
+    records = list(index_records(path))
+    # Every version of a crate shares one output index pathname. Selecting
+    # per-version inputs can overwrite an earlier package's admitted metadata.
+    return all(any(record.get('name') == name and record.get('vers') == package['version']
+                   and record.get('cksum') == package['checksum'] for record in records)
+               for package in registry_packages[name])
+
 records, copies = [], []
 for package in lock['package']:
     if not package.get('source', '').startswith('registry+'):
@@ -64,12 +76,9 @@ for package in lock['package']:
                      key=lambda path: '1949cf8' not in str(path))
     if not indexes:
         raise RuntimeError(f'No local sparse-index metadata: {name}')
-    indexes = [path for path in indexes
-               if any(record.get('name') == name and record.get('vers') == version
-                      and record.get('cksum') == package['checksum']
-                      for record in index_records(path))]
+    indexes = [path for path in indexes if supplies_locked_versions(path, name)]
     if not indexes:
-        raise RuntimeError(f'No checksum-matching sparse-index record: {name} {version}')
+        raise RuntimeError(f'No checksum-matching sparse-index record for all locked versions: {name}')
     copies.append((archives[0], Path('registry/cache'), filename))
     copies.append((indexes[0], Path('registry/index'), Path('.cache') / relative))
     records.append({'package': name, 'version': version,

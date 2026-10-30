@@ -20,6 +20,60 @@ class CargoHomeTests(unittest.TestCase):
             for record in records
         )
 
+    def test_shared_index_covers_every_locked_version_in_either_lock_order(self):
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                self.prepare_multiple_versions(reverse=reverse)
+
+    def test_disjoint_indexes_are_rejected_before_creating_output(self):
+        self.prepare_multiple_versions(disjoint=True)
+
+    def prepare_multiple_versions(self, reverse=False, disjoint=False):
+        # Synthetic metadata/cache controls; no Cargo or program executes.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / 'home'
+            namespaces = ('index.crates.io-1949cf8c6b5b557f',
+                          'index.crates.io-6f17d22bba15001f')
+            versions = ('1.0.0', '2.0.0')
+            records = [{'name': 'cache-probe', 'vers': version,
+                        'cksum': hashlib.sha256(version.encode()).hexdigest()}
+                       for version in versions]
+            for position, namespace in enumerate(namespaces):
+                directory = home / 'registry/index' / namespace
+                (directory / '.cache/ca/ch').mkdir(parents=True)
+                available = [records[1]] if position == 0 else records[:1] if disjoint else records
+                (directory / '.cache/ca/ch/cache-probe').write_bytes(self.sparse_cache(*available))
+                (directory / 'config.json').write_text('{}')
+            cache = home / 'registry/cache' / namespaces[0]
+            cache.mkdir(parents=True)
+            for version in versions:
+                (cache / f'cache-probe-{version}.crate').write_bytes(version.encode())
+            lock = root / 'Cargo.lock'
+            lock.write_text('version = 3\n' + ''.join(
+                '[[package]]\nname="cache-probe"\n'
+                f'version="{record["vers"]}"\n'
+                'source="registry+https://github.com/rust-lang/crates.io-index"\n'
+                f'checksum="{record["cksum"]}"\n'
+                for record in (list(reversed(records)) if reverse else records)))
+            output = root / 'output'
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('prepare_locked_cargo_home.py')),
+                 '--lockfile', str(lock), '--output', str(output)],
+                env={**os.environ, 'CARGO_HOME': str(home)}, capture_output=True, text=True)
+            if disjoint:
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(output.exists())
+                return
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = json.loads((output / 'cache-manifest.json').read_bytes())
+            expected = self.sparse_cache(*records)
+            for namespace in namespaces:
+                actual = (output / 'registry/index' / namespace / '.cache/ca/ch/cache-probe').read_bytes()
+                self.assertEqual(actual, expected)
+                for package in manifest['packages']:
+                    self.assertEqual(package['index_sha256'], hashlib.sha256(actual).hexdigest())
+
     def test_stale_preferred_index_uses_checksum_matching_record(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
