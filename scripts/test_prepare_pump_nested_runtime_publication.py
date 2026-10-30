@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -112,6 +113,39 @@ class NestedRuntimePublicationTests(unittest.TestCase):
         self.assertEqual(len(record['copied_harness_sha256']), 6)
         self.assertTrue((output / 'binding-update.json').is_file())
         self.assertEqual(list(output.parent.glob('.prepared.*')), [])
+
+    def test_late_empty_destination_is_not_replaced(self):
+        output = self.root / 'prepared'
+        write_text = Path.write_text
+        def concurrent_output(path, *args, **kwargs):
+            result = write_text(path, *args, **kwargs)
+            if path.name == 'binding-update.json':
+                output.mkdir()
+            return result
+        with mock.patch.object(Path, 'write_text', concurrent_output):
+            with self.assertRaises(FileExistsError):
+                self.tool.prepare(output)
+        self.assertEqual(list(output.iterdir()), [])
+        self.assertEqual(list(output.parent.glob('.prepared.*')), [])
+
+    def test_existing_output_is_refused_before_checkpoint_access(self):
+        output = self.root / 'prepared'
+        output.mkdir()
+        with mock.patch.object(self.tool, 'verify_checkpoint') as checkpoint:
+            with self.assertRaises(FileExistsError):
+                self.tool.prepare(output)
+            checkpoint.assert_not_called()
+        self.assertEqual(list(output.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX directory mode check')
+    def test_prepared_output_keeps_process_umask(self):
+        output = self.root / 'prepared'
+        previous = os.umask(0o027)
+        try:
+            self.tool.prepare(output)
+        finally:
+            os.umask(previous)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o750)
 
 
 if __name__ == '__main__':

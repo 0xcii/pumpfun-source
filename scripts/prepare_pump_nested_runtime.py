@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Copy the sealed nested-route harness and bind it to the current main build."""
+"""Copy the sealed nested-route harness and bind it to the current main build.
+
+Publish a complete directory only to an absent destination, preserving the
+process umask. Hosts without native atomic no-replace support fail closed.
+"""
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path, PurePosixPath
 import shutil
-import tempfile
 from verify_current_checkpoint import verify as verify_checkpoint
+from deep_disassembly import rename_directory, temporary_sibling
 
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS_PACKAGE = ROOT / 'repro/pump/buy-mode-order-fortyeight'
@@ -56,7 +59,7 @@ def prepare(output):
         check(name.startswith('programs/pump/') and sha(ROOT / name) == digest, name)
     check(report['comparison']['candidate_sha256'] == sha(candidate) == checkpoint['candidate_sha256'])
     output.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix='.' + output.name + '.', dir=output.parent))
+    staging = temporary_sibling(output, 'staging')
     try:
         copied = {}
         for name, value in selected.items():
@@ -83,7 +86,7 @@ def prepare(output):
         }
         (staging / 'binding-update.json').write_text(
             json.dumps(record, indent=2, sort_keys=True) + '\n')
-        os.rename(staging, output)
+        rename_directory(staging, output)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
