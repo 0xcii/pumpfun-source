@@ -189,6 +189,10 @@ def build(src: Path, work: Path, out: Path, quiet=False, recipe=None, timeout=No
     if (src == work or src in work.parents or work in src.parents
             or src == out or src in out.parents or out in src.parents):
         raise ValueError('source must not overlap the build workspace or contain output')
+    # Staging uses rsync --delete before prior outputs are archived.
+    staged = (work / 'ws/programs/pump').resolve()
+    if out == staged or staged in out.parents:
+        raise ValueError('output must not be inside the staged source tree')
     with workspace_lock(work):
         with output_lock(out):
             return _build_locked(src, work, out, quiet=quiet, recipe=recipe, timeout=timeout)
