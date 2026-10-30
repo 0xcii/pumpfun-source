@@ -53,6 +53,7 @@ jobs:
               python scripts/test_tooling.py
               python -B scripts/test_build_token_dependency_optimization.py
               python -B scripts/test_measure_relay13_v148_optimization.py
+              python -B scripts/test_fees_withdraw_runtime_optimization.py
               python -B tests/test_verify_dependencies_optimization.py
               python -B tests/test_recovered_builds_optimization.py
               python -B scripts/test_mayhem_burn_sequence_optimization.py
