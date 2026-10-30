@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -18,6 +19,26 @@ def generate(output):
     argv = ["deep_section_analysis.py", "--program", "mayhem", "--output", str(output)]
     with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
         return deep_section_analysis.main()
+
+
+class DeepSectionStringAddressTests(unittest.TestCase):
+    def test_run_reaching_the_section_end_uses_the_virtual_address_base(self):
+        # .rodata mapped at 0x2000 but stored at file offset 0x40; the last
+        # eight bytes are printable, so the run is flushed after the loop.
+        blob = bytearray(0x50)
+        blob[0x40:0x50] = b"\x00" * 8 + b"SECTION!"
+        elf = SimpleNamespace(
+            b=bytes(blob),
+            secs={".rodata": (0, 0, 0, 0x2000, 0x40, 16, 0, 0, 0, 1)},
+            relocations={},
+            lo=0x100,
+            hi=0x120,
+        )
+        layout = deep_section_analysis.analyze_data_layout(elf)
+        (string,) = layout[".rodata"]["strings"]
+        self.assertEqual(string["value"], "SECTION!")
+        self.assertEqual(string["offset"], 8)
+        self.assertEqual(string["address"], hex(0x2000 + 8))
 
 
 class DeepSectionPublicationTests(unittest.TestCase):
