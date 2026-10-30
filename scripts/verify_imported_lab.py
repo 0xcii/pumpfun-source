@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Verify frozen lab import and replay saved receipts in a disposable local tree.
 Optional runtime replay submits signed transactions ONLY to offline loopback Surfpool.
+Complete output is published with atomic no-replace semantics and normal umask
+permissions; inputs cannot overlap the output tree.
 """
-import argparse,hashlib,json,os,pathlib,shutil,subprocess,sys,tempfile
+import argparse,hashlib,json,pathlib,shutil,subprocess,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'scripts'))
+from deep_disassembly import rename_directory,temporary_sibling
 VERIFIERS=['pump_fun_verify_offline','pump_fun_admin_surfpool_verify','pump_fun_amm_v2_surfpool_verify','pump_fun_curve_fresh_surfpool_verify','pump_fun_curve_migration_surfpool_verify','pump_fun_post_migration_amm_surfpool_verify','pump_fun_fees_withdraw_surfpool_verify']
 REPLAY=['pump_fun_admin_surfpool','pump_fun_amm_buy_v2_surfpool','pump_fun_curve_create_v2_surfpool','pump_fun_fees_withdraw_surfpool']
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
@@ -44,11 +48,14 @@ def main():
  ap=argparse.ArgumentParser();ap.add_argument('--docs-checkout',type=pathlib.Path,required=True);ap.add_argument('--output',type=pathlib.Path,required=True);ap.add_argument('--surfpool',type=pathlib.Path);args=ap.parse_args()
  output=args.output.resolve()
  if output.exists() or output.is_symlink():raise FileExistsError(output)
+ for source in ((ROOT/'research/imported-lab').resolve(),args.docs_checkout.resolve()):
+  if output==source or source in output.parents or output in source.parents:
+   raise ValueError('output must not overlap imported lab or docs inputs')
  output.parent.mkdir(parents=True,exist_ok=True)
- staging=pathlib.Path(tempfile.mkdtemp(prefix='.'+output.name+'.',dir=output.parent))
+ staging=temporary_sibling(output,'staging')
  try:
   initial,runtime=verify(args,staging)
-  os.replace(staging,output)
+  rename_directory(staging,output)
  except BaseException:
   shutil.rmtree(staging,ignore_errors=True)
   raise

@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -115,6 +116,50 @@ class ImportedLabPublicationTests(unittest.TestCase):
         report = json.loads((output / 'integration-verification.json').read_text())
         self.assertTrue(report['saved_receipt_verifiers_passed'])
         self.assertEqual(list(output.parent.glob('.verification.*')), [])
+
+    def test_late_empty_output_is_not_replaced(self):
+        output = self.root / 'verification'
+        def complete_verification(args, staging):
+            (staging / 'integration-verification.json').write_text('{}\n')
+            output.mkdir()
+            return True, None
+        with mock.patch.object(self.tool, 'verify', complete_verification), \
+                mock.patch.object(sys, 'argv', [
+                    'verify_imported_lab.py', '--docs-checkout', str(self.docs),
+                    '--output', str(output)]):
+            with self.assertRaises(FileExistsError):
+                self.tool.main()
+        self.assertEqual(list(output.iterdir()), [])
+        self.assertEqual(list(output.parent.glob('.verification.*')), [])
+
+    def test_output_cannot_overlap_imported_inputs_or_docs(self):
+        for parent in (self.root / 'research/imported-lab', self.docs):
+            with self.subTest(parent=parent), mock.patch.object(self.tool, 'verify') as verify, \
+                    mock.patch.object(sys, 'argv', [
+                        'verify_imported_lab.py', '--docs-checkout', str(self.docs),
+                        '--output', str(parent / 'new-output')]):
+                before = sorted(str(path.relative_to(self.root)) for path in self.root.rglob('*'))
+                with self.assertRaisesRegex(ValueError, 'output must not overlap'):
+                    self.tool.main()
+                verify.assert_not_called()
+                self.assertEqual(sorted(str(path.relative_to(self.root)) for path in self.root.rglob('*')), before)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX mode check')
+    def test_new_output_follows_umask(self):
+        output = self.root / 'verification'
+        def complete_verification(args, staging):
+            (staging / 'integration-verification.json').write_text('{}\n')
+            return True, None
+        old = os.umask(0o027)
+        try:
+            with mock.patch.object(self.tool, 'verify', complete_verification), \
+                    mock.patch.object(sys, 'argv', [
+                        'verify_imported_lab.py', '--docs-checkout', str(self.docs),
+                        '--output', str(output)]):
+                self.tool.main()
+        finally:
+            os.umask(old)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o750)
 
 
 if __name__ == '__main__':
