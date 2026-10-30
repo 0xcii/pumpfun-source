@@ -89,6 +89,7 @@ jobs:
               python -B scripts/test_claim_differentials_optimization.py
               python -B scripts/test_fees_error_messages_precondition.py
               python -B scripts/test_validate_fee_handlers_optimized_exit.py
+              python -B scripts/test_current673_macos_optimized_mode.py
               python -B scripts/test_pump_differential_optimized_mode.py
               python -B scripts/test_pump_validate_constant_product_optimization.py
               python -B scripts/test_pump_validate_volume_optimization.py
