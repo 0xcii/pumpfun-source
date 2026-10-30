@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +10,28 @@ from source_manifest_guard import strict_manifest
 
 
 class SourceManifestGuardTests(unittest.TestCase):
+    def test_reparse_tag_is_rejected_before_any_input_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            crate = repository / 'programs/pump'
+            linked = crate / 'src/linked'
+            linked.mkdir(parents=True)
+            (linked / 'input.rs').write_text('must not be read', encoding='utf-8')
+            lstat = os.lstat
+
+            def marked(path, *args, **kwargs):
+                info = lstat(path, *args, **kwargs)
+                if Path(path) == linked:
+                    fields = {name: getattr(info, name) for name in dir(info)
+                              if name.startswith('st_')}
+                    return SimpleNamespace(**fields, st_reparse_tag=0xA0000003)
+                return info
+
+            with patch.object(os, 'lstat', marked), \
+                    patch.object(Path, 'read_bytes', side_effect=AssertionError('read before rejection')):
+                with self.assertRaisesRegex(ValueError, 'reparse point'):
+                    strict_manifest(crate, repository, repository)
+
     def test_symlink_is_rejected_before_any_input_byte_is_read(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
