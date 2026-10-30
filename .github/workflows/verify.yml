@@ -77,6 +77,7 @@ jobs:
               python -B scripts/test_fees_validate_all_optimization.py
               python -B scripts/test_deep_section_analysis_publication.py
               python -B scripts/test_analyze_program_publication.py
+              python -B scripts/test_reconstruction_roadmap_publication.py
               python -B scripts/test_bytecode_signatures_publication.py
               python -B scripts/test_donation_relay_oracle_optimization.py
               python -B -X utf8 tests/test_dispatch_idl_encoding.py
