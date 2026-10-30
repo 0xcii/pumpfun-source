@@ -89,6 +89,9 @@ jobs:
               python -B tests/test_aggregate_pinned_image.py
               python -B tests/test_pump_validators_pinned_image.py
               python -B tests/test_create_mayhem_candidate_pair.py
+              python -B tests/test_fees_donation_create_pinned_image.py
+              python -B tests/test_fees_social_claim_pinned_image.py
+              python -B tests/test_fees_donation_crank_pinned_image.py
               python -B tests/test_two_curve_optimization_guard.py
               python -O -B tests/test_two_curve_optimization_guard.py
               python -B scripts/test_dispatch_recovery.py
@@ -110,9 +113,11 @@ jobs:
               python -B tests/test_verify_dependencies_optimization.py
               python -B tests/test_recovered_builds_optimization.py
               python -B scripts/test_mayhem_burn_sequence_optimization.py
+              python -B scripts/test_rebuild_workflow_action_pins.py
               python -B scripts/test_macos_v144_qualification_optimization.py
               python -B scripts/test_mayhem_initialize_state_optimization.py
               python -B scripts/test_fees_crank_probe_optimization.py
+              python -B scripts/test_surfpool_truncated_events.py
               python -B scripts/test_constant_product_range_pinning.py
               python -B scripts/test_pump_build_constant_product_binding.py
               python -B scripts/test_fees_validate_all_optimization.py
