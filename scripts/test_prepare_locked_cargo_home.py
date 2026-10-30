@@ -137,6 +137,52 @@ class CargoHomeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('No checksum-matching sparse-index record', result.stderr)
 
+    def test_failed_copy_does_not_leave_a_partial_cache_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / 'cargo-home'
+            namespace = 'index.crates.io-1949cf8c6b5b557f'
+            archive = home / 'registry/cache' / namespace / 'cache-probe-1.0.0.crate'
+            archive.parent.mkdir(parents=True)
+            archive.write_bytes(b'checksum-matched archive')
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            index = home / 'registry/index' / namespace / '.cache/ca/ch/cache-probe'
+            index.parent.mkdir(parents=True)
+            index.write_bytes(self.sparse_cache(
+                {'name': 'cache-probe', 'vers': '1.0.0', 'cksum': digest}))
+            (index.parents[3] / 'config.json').write_text('{}', encoding='utf-8')
+            lock = root / 'Cargo.lock'
+            lock.write_text('[[package]]\nname="cache-probe"\nversion="1.0.0"\n'
+                            'source="registry+https://github.com/rust-lang/crates.io-index"\n'
+                            f'checksum="{digest}"\n', encoding='utf-8')
+
+            injections = root / 'injections'
+            injections.mkdir()
+            (injections / 'sitecustomize.py').write_text(
+                'import shutil\n'
+                'real_copyfile = shutil.copyfile\n'
+                'copy_count = 0\n'
+                'def interrupted_copyfile(*args, **kwargs):\n'
+                '    global copy_count\n'
+                '    copy_count += 1\n'
+                '    if copy_count == 2:\n'
+                "        raise OSError('injected cache copy failure')\n"
+                '    return real_copyfile(*args, **kwargs)\n'
+                'shutil.copyfile = interrupted_copyfile\n',
+                encoding='utf-8',
+            )
+            output = root / 'output'
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('prepare_locked_cargo_home.py')),
+                 '--lockfile', str(lock), '--output', str(output)],
+                env={**os.environ, 'CARGO_HOME': str(home),
+                     'PYTHONPATH': str(injections)},
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('injected cache copy failure', result.stderr)
+            self.assertFalse(output.exists(), 'failed preparation left a partial cache output')
+
     def test_matching_index_is_consumable_by_offline_cargo(self):
         cargo = shutil.which('cargo')
         if cargo is None:

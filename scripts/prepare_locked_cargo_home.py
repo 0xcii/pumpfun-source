@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import tempfile
 import tomllib
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -93,16 +94,22 @@ if records:
         raise RuntimeError('No local crates.io registry configuration')
     config = configs[0]
     copies.append((config, Path('registry/index'), 'config.json'))
-# Every locked package resolved; only now create the cache, so a failed
-# preparation leaves no partial output that blocks the rerun.
-args.output.mkdir(parents=True, exist_ok=False)
-for origin, area, name in copies:
-    for namespace in namespaces:
-        target = args.output / area / namespace / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(origin, target)
-manifest = {'scope': 'Existing local archives verified against a fixed Cargo.lock; no network download.',
-            'lockfile_sha256': hashlib.sha256(raw_lock).hexdigest(),
-            'registry_config_sha256': sha(config) if config is not None else None, 'packages': records}
-(args.output / 'cache-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+# Every locked package resolved. Build the complete cache beside the requested
+# path, then publish it with one rename; a failed copy must not poison a rerun.
+args.output.parent.mkdir(parents=True, exist_ok=True)
+staging = Path(tempfile.mkdtemp(prefix='.' + args.output.name + '.', dir=args.output.parent))
+try:
+    for origin, area, name in copies:
+        for namespace in namespaces:
+            target = staging / area / namespace / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(origin, target)
+    manifest = {'scope': 'Existing local archives verified against a fixed Cargo.lock; no network download.',
+                'lockfile_sha256': hashlib.sha256(raw_lock).hexdigest(),
+                'registry_config_sha256': sha(config) if config is not None else None, 'packages': records}
+    (staging / 'cache-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    staging.rename(args.output)
+except BaseException:
+    shutil.rmtree(staging, ignore_errors=True)
+    raise
 print(f'Prepared {len(records)} checksum-verified packages in {args.output}')
