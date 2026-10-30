@@ -4,6 +4,10 @@
 Produces a detailed window inventory, call graph, function size distribution,
 and cross-referencing data for reconstruction work.
 
+Regeneration retains the prior packet in a printed sibling .previous-* directory.
+Publication uses the shared native exchange/no-replace helpers; unsupported hosts
+fail closed.
+
 Usage:
     python3 scripts/analyze_program.py --program pump --output research/pump-window-analysis-20261028
     python3 scripts/analyze_program.py --program pump_amm --output research/amm-window-analysis-20261028
@@ -13,16 +17,15 @@ import bisect
 import collections
 import hashlib
 import json
-import os
 import shutil
 import stat
 import sys
-import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 from window_elf_reader import Elf
+from deep_disassembly import directory_identity, publish_packet, temporary_sibling
 
 PACKET_FILES = frozenset({
     "README.md",
@@ -75,35 +78,7 @@ def prepare_output_directory(output_dir):
                          and not (output_dir / name).is_file()))
     if invalid:
         raise ValueError("packet entry is not a regular file: " + ", ".join(invalid))
-    return output_dir
-
-
-def temporary_sibling(output_dir, label):
-    while True:
-        staging = output_dir.parent / (
-            f".{output_dir.name}.{label}-{os.getpid()}-{uuid.uuid4().hex}"
-        )
-        try:
-            staging.mkdir()
-        except FileExistsError:
-            continue
-        return staging
-
-
-def publish_packet(staging, output_dir):
-    backup = None
-    if output_dir.exists():
-        backup = temporary_sibling(output_dir, "previous")
-        backup.rmdir()
-        output_dir.rename(backup)
-    try:
-        staging.rename(output_dir)
-    except BaseException:
-        if backup is not None and backup.exists():
-            backup.rename(output_dir)
-        raise
-    if backup is not None:
-        shutil.rmtree(backup)
+    return output_dir, directory_identity(output_dir)
 
 
 def _build_packet(program_name, output_dir, output_label):
@@ -401,16 +376,17 @@ if __name__ == "__main__":
 
 
 def analyze_program(program_name, output_dir):
-    output_dir = prepare_output_directory(output_dir)
+    output_dir, expected_identity = prepare_output_directory(output_dir)
     staging = temporary_sibling(output_dir, "staging")
     try:
         result = _build_packet(program_name, staging, output_dir)
-        if result != 0:
-            return result
-        publish_packet(staging, output_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    if result != 0:
+        shutil.rmtree(staging, ignore_errors=True)
+        return result
+    publish_packet(staging, output_dir, expected_identity)
     return 0
 
 
