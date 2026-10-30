@@ -432,7 +432,9 @@ def recover_anchor_idl(elf):
                     next_off = offset + 16
                     if next_off + 8 <= elf.hi and b[next_off] in (0x1d, 0x5d, 0x15, 0x55):
                         jregs = b[next_off + 1]
-                        keep = (jregs >> 4) == dst_reg or (jregs & 0xF) == dst_reg
+                        keep = (jregs & 0xF) == dst_reg or (
+                            b[next_off] in (0x1d, 0x5d) and (jregs >> 4) == dst_reg
+                        )
                 if keep and val not in seen:
                     seen.add(val)
                     discriminators.append({

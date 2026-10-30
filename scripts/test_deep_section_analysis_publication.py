@@ -39,7 +39,7 @@ class DeepSectionLayer4Tests(unittest.TestCase):
 
     @staticmethod
     def heuristic_elf(instructions):
-        blob = bytearray(0x80)
+        blob = bytearray(0xe0)
         for offset, data in instructions.items():
             blob[offset:offset + len(data)] = data
         # No .path attribute: no archived IDL, so the register-bound heuristic runs.
@@ -56,11 +56,17 @@ class DeepSectionLayer4Tests(unittest.TestCase):
             # lddw r1, selector; jeq r1, ... — the branch tests the loaded register.
             0x60: lddw(1, 0x1122334455667788) + struct.pack("<BBhi", 0x1d, 0x10, 1, 0),
             # The same selector loaded again is reported once.
-            0x70: lddw(2, 0x1122334455667788) + struct.pack("<BBhi", 0x5d, 0x02, 1, 0),
+            0x80: lddw(2, 0x1122334455667788) + struct.pack("<BBhi", 0x5d, 0x02, 1, 0),
+            # Immediate branches have no source register; the zero high nibble
+            # must not make a branch on r2 appear to test a loaded r0.
+            0xa0: lddw(0, 0x9988776655443322) + struct.pack("<BBhi", 0x15, 0x02, 1, 0),
+            # An immediate comparison on the loaded destination is valid.
+            0xc0: lddw(3, 0x8877665544332211) + struct.pack("<BBhi", 0x55, 0x03, 1, 0),
         })
         recovered = deep_section_analysis.recover_anchor_idl(elf)["discriminators"]
         self.assertEqual([d["bytes"] for d in recovered],
-                         [(0x1122334455667788).to_bytes(8, "little").hex()])
+                         [value.to_bytes(8, "little").hex() for value in
+                          (0x1122334455667788, 0x8877665544332211)])
 
 
 class DeepSectionRelocationBoundsTests(unittest.TestCase):
