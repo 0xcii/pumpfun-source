@@ -76,6 +76,32 @@ groups instead of letting `_114.i` move. A source fix has to keep `_11.i294` (th
 alloca at T 0x1) unmerged as well: every edit that lets it merge shifts the whole frame top by 8 B
 (that is what sank F4 and the forced-H24 variants: 0.268).
 
+### The features stack on the leading candidate family (sibling t23)
+
+w12a11-cto-sibling t23 (amm_cb_local + k4_oldfee_after, 0.48449 at 27,392 B) captured and
+re-scored with llc: tokens reproduce its build. Its frame has the same defect (`_114.i` alone at
+fi41, T 0x480), so the frame features apply unchanged:
+
+| edit on t23's IR | ratio | pf_ratio |
+| --- | ---: | ---: |
+| t23 | 0.48449 | 0.59566 |
+| F1 `mv:_114.i:_183` | 0.51026 (+0.026) | 0.59655 |
+| F1 + `nolt:buf.i40.i` + `mv:val6:_183` | **0.52614 (+0.042)** | 0.59685 |
+| + C1 `inv:bb11.i` | 0.52718 at 27,408 B | 0.60087 |
+
+### Code-level greedy (pf objective, on F1 + C1, 27,400 B)
+
+| round | edit | pf_ratio | ratio |
+| --- | --- | ---: | ---: |
+| 0 | F1 + C1 | 0.59257 | 0.49670 |
+| 1 | `bw:bb1.i:2000:1` (284 mayhem error's to_string unwrap test made "hot") | **0.61174** (+0.019) | 0.50419 |
+| runners-up | `bw:bb34.i`/`bw:bb35.i` 2000:1 (the 312 `t==holder_key` / `t==sharing` memcmp tests) | 0.60015 | |
+
+These are block-frequency effects inside validate (they move spill weights and the error blocks'
+placement), the same mechanism w12a08-cto-errorder documents: the original's holder/new tests are
+`trunc` tests that BPI leaves at 50/50, ours get the 62.5/37.5 zero heuristic. Single branch
+weights elsewhere are worth <= +0.003.
+
 ### Where the unmatched mass is (scripts/regionmap.py, 256-instruction original segments)
 
 `pf` = matched after remapping every frame offset to the original's; `pf-miss` = original tokens
