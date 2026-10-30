@@ -1,4 +1,4 @@
-"""Eight Pump differential CLIs execute and report one candidate image per run.
+"""Ten Pump differential CLIs execute and report one candidate image per run.
 
 Each real CLI continues using the initially admitted program bytes after its
 candidate path is replaced following the first candidate case.
@@ -92,6 +92,12 @@ class PumpDifferentialPinnedImageTest(unittest.TestCase):
 
     def test_idl_authority(self):
         self.run_swapped('idl_authority')
+
+    def test_global_init(self):
+        self.run_swapped('global_init')
+
+    def test_cashback(self):
+        self.run_swapped('cashback')
 
 if __name__ == '__main__':
     unittest.main()
