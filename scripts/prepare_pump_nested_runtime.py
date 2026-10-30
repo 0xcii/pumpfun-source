@@ -3,7 +3,10 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
+import shutil
+import tempfile
 from verify_current_checkpoint import verify as verify_checkpoint
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +28,9 @@ def check(ok, message="nested runtime check failed"):
 
 
 def prepare(output):
+    output = Path(output)
+    if output.exists() or output.is_symlink():
+        raise FileExistsError(output)
     checkpoint = verify_checkpoint('pump', ROOT)
     status = json.loads((ROOT / 'repro/status.json').read_text())['pump']
     candidate = ROOT / status['candidate_artifact']
@@ -49,31 +55,38 @@ def prepare(output):
         check(not path.is_absolute() and '..' not in path.parts)
         check(name.startswith('programs/pump/') and sha(ROOT / name) == digest, name)
     check(report['comparison']['candidate_sha256'] == sha(candidate) == checkpoint['candidate_sha256'])
-    output.mkdir(parents=True, exist_ok=False)
-    copied = {}
-    for name, value in selected.items():
-        source = HARNESS_PACKAGE / name
-        check(not source.is_symlink() and sha(source) == value['sha256'], name)
-        relative = PurePosixPath(name[len(PREFIX):])
-        check(not relative.is_absolute() and '..' not in relative.parts)
-        target = output.joinpath(*relative.parts)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(source.read_bytes())
-        copied[str(relative)] = sha(target)
-    source_map = output / 'expected-source-map.json'
-    historical_sha = sha(source_map)
-    source_map.write_text(json.dumps(sources, indent=2, sort_keys=True) + '\n')
-    record = {
-        'status': 'PASS', 'target_executions': 0, 'source_inputs': len(sources),
-        'frozen_harness_seal': HARNESS_SEAL, 'copied_harness_sha256': copied,
-        'historical_source_map_sha256': historical_sha,
-        'current_source_map_sha256': sha(source_map),
-        'build_report_sha256': sha(report_path), 'build_attempt_sha256': sha(attempt_path),
-        'candidate_sha256': sha(candidate),
-        'current_checkpoint': str(main_package.relative_to(ROOT)),
-        'scope': 'Only the copied expected source map changes; cases, runtime code and assertions retain their sealed bytes.'
-    }
-    (output / 'binding-update.json').write_text(json.dumps(record, indent=2, sort_keys=True) + '\n')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix='.' + output.name + '.', dir=output.parent))
+    try:
+        copied = {}
+        for name, value in selected.items():
+            source = HARNESS_PACKAGE / name
+            check(not source.is_symlink() and sha(source) == value['sha256'], name)
+            relative = PurePosixPath(name[len(PREFIX):])
+            check(not relative.is_absolute() and '..' not in relative.parts)
+            target = staging.joinpath(*relative.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+            copied[str(relative)] = sha(target)
+        source_map = staging / 'expected-source-map.json'
+        historical_sha = sha(source_map)
+        source_map.write_text(json.dumps(sources, indent=2, sort_keys=True) + '\n')
+        record = {
+            'status': 'PASS', 'target_executions': 0, 'source_inputs': len(sources),
+            'frozen_harness_seal': HARNESS_SEAL, 'copied_harness_sha256': copied,
+            'historical_source_map_sha256': historical_sha,
+            'current_source_map_sha256': sha(source_map),
+            'build_report_sha256': sha(report_path), 'build_attempt_sha256': sha(attempt_path),
+            'candidate_sha256': sha(candidate),
+            'current_checkpoint': str(main_package.relative_to(ROOT)),
+            'scope': 'Only the copied expected source map changes; cases, runtime code and assertions retain their sealed bytes.'
+        }
+        (staging / 'binding-update.json').write_text(
+            json.dumps(record, indent=2, sort_keys=True) + '\n')
+        os.rename(staging, output)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     return record
 
 
