@@ -15,6 +15,8 @@ class T(unittest.TestCase):
         self.t=Path(tempfile.mkdtemp(prefix="fees rebuild "))
         self.repo=self.t/"repo"; self.pk=self.repo/"research/pk"
         for r in READS: (self.repo/r).parent.mkdir(parents=True,exist_ok=True); shutil.copy2(REPO/r,self.repo/r)
+        shutil.copytree(REPO/"programs/pump-fees",self.repo/"programs/pump-fees",dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__","target"))
         shutil.copytree(HERE,self.pk,ignore=shutil.ignore_patterns("__pycache__"))
     def tearDown(self): shutil.rmtree(self.t)
     def run_ok(self,**kw): return verify.check(self.repo,self.pk,**kw)
@@ -54,4 +56,14 @@ class T(unittest.TestCase):
         f=self.t/"cand.so"; d=(self.repo/"evidence/original/pump_fees/deployed.so").read_bytes()[:873256]; f.write_bytes(d)
         self.assertTrue(self.run_ok(candidate=str(f)).startswith("OK"))
         self.flip(f,4096); self.bad("candidate_sha256",candidate=str(f))
+    def test_current_source_changed(self):
+        source=self.repo/"programs/pump-fees/src/buyback.rs"
+        source.write_text(source.read_text()+"\n// mutated canonical source\n")
+        self.bad("canonical source validation failed")
+    def test_matching_run_digests_do_not_replace_current_source(self):
+        self.edit_result(lambda r:[run["inventory_digests"].__setitem__("source_inputs","0"*64) for run in r["runs"]])
+        self.bad("source_inputs differs from current canonical source")
+    def test_matching_macro_digests_do_not_replace_current_macros(self):
+        self.edit_result(lambda r:[run["inventory_digests"].__setitem__("macro_inputs","0"*64) for run in r["runs"]])
+        self.bad("macro_inputs differs from current canonical source")
 if __name__=="__main__": unittest.main()

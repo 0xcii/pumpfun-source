@@ -50,8 +50,11 @@ digest was therefore not exercised by this run.
 - **Builder.** Appending one comment line to `programs/pump-fees/src/buyback.rs`
   in an exported copy makes the real builder refuse before compiling, with
   `ValueError: canonical input changed`. This is recorded in `RESULT.json`.
-- **Verifier.** `test_verify.py` runs a positive check on the real tree and on a
-  copy with a space in its path. It then runs 14 mutations that must each fail
+- **Verifier.** It stages the current canonical inputs with the unchanged builder
+  in a temporary directory, without invoking a compiler, and binds the source,
+  qualified-source, input-mapping and macro inventories to both run receipts.
+  `test_verify.py` runs a positive check on the real tree and on a
+  copy with a space in its path. It then runs 17 mutations that must each fail
   with a specific message:
   - an edited result without its checksum;
   - a mutated run hash;
@@ -67,6 +70,8 @@ digest was therefore not exercised by this run.
   - a tampered shim;
   - a changed checkpoint record;
   - a flipped byte in a supplied candidate.
+  - changed current source or mutually consistent run digests that do not match
+    the current source or macros.
 
 ## Verify (offline, stdlib, under `-O` too)
 
