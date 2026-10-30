@@ -13,6 +13,76 @@ import unittest
 
 
 class CargoHomeTests(unittest.TestCase):
+    def run_empty_cache(self, root, output, extra_env=None):
+        lock = root / 'empty.lock'
+        lock.write_text('version = 3\npackage = []\n', encoding='utf-8')
+        command = [sys.executable, '-c',
+                   "import os,runpy,sys; os.umask(0o027); "
+                   "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')",
+                   str(Path(__file__).with_name('prepare_locked_cargo_home.py')),
+                   '--lockfile', str(lock), '--output', str(output)]
+        return subprocess.run(command, env={**os.environ, **(extra_env or {})},
+                              capture_output=True, text=True)
+
+    def test_existing_empty_directory_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'output'
+            output.mkdir()
+            result = self.run_empty_cache(root, output)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(output.is_dir())
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(list(root.glob('.output.*')), [])
+
+    def test_late_empty_directory_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'output'
+            injections = root / 'injections'
+            injections.mkdir()
+            (injections / 'sitecustomize.py').write_text(
+                'import os\nfrom pathlib import Path\n'
+                'real_write = Path.write_text\n'
+                'def write(self, *args, **kwargs):\n'
+                '    result = real_write(self, *args, **kwargs)\n'
+                "    if self.name == 'cache-manifest.json':\n"
+                "        Path(os.environ['LATE_OUTPUT']).mkdir()\n"
+                '    return result\n'
+                'Path.write_text = write\n', encoding='utf-8')
+            result = self.run_empty_cache(root, output,
+                {'PYTHONPATH': str(injections), 'LATE_OUTPUT': str(output)})
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(output.is_dir())
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(list(root.glob('.output.*')), [])
+
+    @unittest.skipIf(os.name == 'nt', 'Windows uses its native no-replace rename')
+    def test_unavailable_atomic_publication_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'output'
+            injections = root / 'injections'
+            injections.mkdir()
+            (injections / 'sitecustomize.py').write_text(
+                'import ctypes\nctypes.CDLL = lambda *args, **kwargs: object()\n', encoding='utf-8')
+            result = self.run_empty_cache(root, output, {'PYTHONPATH': str(injections)})
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn('atomic no-replace directory publication unavailable', result.stderr)
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.glob('.output.*')), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX permission mode check')
+    def test_published_directory_keeps_the_process_umask(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'output'
+            result = self.run_empty_cache(root, output)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o750)
+            self.assertTrue((output / 'cache-manifest.json').is_file())
+            self.assertEqual(list(root.glob('.output.*')), [])
+
     @staticmethod
     def sparse_cache(*records):
         return b'\x03\x02\x00\x00\x00offline-fixture\x00' + b''.join(
@@ -136,6 +206,53 @@ class CargoHomeTests(unittest.TestCase):
                                     env={**os.environ, 'CARGO_HOME': str(home)}, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('No checksum-matching sparse-index record', result.stderr)
+
+    def test_failed_copy_does_not_leave_a_partial_cache_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / 'cargo-home'
+            namespace = 'index.crates.io-1949cf8c6b5b557f'
+            archive = home / 'registry/cache' / namespace / 'cache-probe-1.0.0.crate'
+            archive.parent.mkdir(parents=True)
+            archive.write_bytes(b'checksum-matched archive')
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            index = home / 'registry/index' / namespace / '.cache/ca/ch/cache-probe'
+            index.parent.mkdir(parents=True)
+            index.write_bytes(self.sparse_cache(
+                {'name': 'cache-probe', 'vers': '1.0.0', 'cksum': digest}))
+            (index.parents[3] / 'config.json').write_text('{}', encoding='utf-8')
+            lock = root / 'Cargo.lock'
+            lock.write_text('[[package]]\nname="cache-probe"\nversion="1.0.0"\n'
+                            'source="registry+https://github.com/rust-lang/crates.io-index"\n'
+                            f'checksum="{digest}"\n', encoding='utf-8')
+
+            injections = root / 'injections'
+            injections.mkdir()
+            (injections / 'sitecustomize.py').write_text(
+                'import shutil\n'
+                'real_copyfile = shutil.copyfile\n'
+                'copy_count = 0\n'
+                'def interrupted_copyfile(*args, **kwargs):\n'
+                '    global copy_count\n'
+                '    copy_count += 1\n'
+                '    if copy_count == 2:\n'
+                "        raise OSError('injected cache copy failure')\n"
+                '    return real_copyfile(*args, **kwargs)\n'
+                'shutil.copyfile = interrupted_copyfile\n',
+                encoding='utf-8',
+            )
+            output = root / 'output'
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('prepare_locked_cargo_home.py')),
+                 '--lockfile', str(lock), '--output', str(output)],
+                env={**os.environ, 'CARGO_HOME': str(home),
+                     'PYTHONPATH': str(injections)},
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('injected cache copy failure', result.stderr)
+            self.assertFalse(output.exists(), 'failed preparation left a partial cache output')
+            self.assertEqual(list(root.glob('.output.*')), [])
 
     def test_matching_index_is_consumable_by_offline_cargo(self):
         cargo = shutil.which('cargo')
