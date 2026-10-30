@@ -20,14 +20,16 @@ def digest(path):
 def prepare(root, sdk, proof):
     archive = root / 'work/platform-tools-linux-v144.tar.bz2'
     urllib.request.urlretrieve(URL, archive)
-    assert digest(archive) == SHA256, 'official Linux SDK archive differs'
+    if digest(archive) != SHA256:
+        raise ValueError('official Linux SDK archive differs')
     sdk.mkdir(parents=True, exist_ok=False)
     with tarfile.open(archive, 'r:bz2') as source:
         source.extractall(sdk, filter='data')
     libraries = sdk / 'rust/lib/rustlib/sbpf-solana-solana/lib'
     expected = json.loads((root / 'scripts/pump_linux_v144_sbpf_libraries.json').read_text())['target_libraries']
     actual = {path.name: digest(path) for path in libraries.iterdir() if path.is_file()}
-    assert actual == expected, 'native target libraries differ from pinned official Linux SBPF set'
+    if actual != expected:
+        raise ValueError('native target libraries differ from pinned official Linux SBPF set')
     record = {'url': URL, 'archive_sha256': SHA256, 'native_host': 'Linux x86_64',
               'target': 'sbpf-solana-solana', 'target_libraries': actual,
               'tools': {name: digest(sdk / name) for name in ('rust/bin/rustc', 'rust/bin/cargo', 'llvm/bin/llvm-objcopy')},

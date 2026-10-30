@@ -30,3 +30,8 @@ and the exact pinned SBPF target-library hashes, then uses the verified builder'
 existing native `--target sbpf-solana-solana` path. It does not impersonate the
 macOS target-library profile or substitute tool bytes. Both red/green runs use
 the same native Linux distribution; cross-host ELF identity is not claimed.
+
+The Linux proof extracts into the fresh `work/quote-native-sdk` directory,
+leaving an already installed SDK available for other builds. Use a clean work
+directory for each proof. The reproduction command rejects `-O` and `-OO`,
+since disabling assertions would disable its result checks.

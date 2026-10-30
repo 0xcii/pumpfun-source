@@ -9,6 +9,9 @@ import shutil
 import subprocess
 import sys
 
+if not __debug__:
+    raise SystemExit("quote reproduction requires Python assertions; omit -O/-OO")
+
 ROOT = Path(__file__).resolve().parents[2]
 PROOF = ROOT / 'work/scoped-proof'
 PROOF.mkdir(parents=True, exist_ok=True)
@@ -38,6 +41,9 @@ shape = {name: hashlib.sha256(ast.dump(node, include_attributes=False).encode())
 (PROOF / 'unchanged-logic.json').write_text(json.dumps(shape, indent=2) + '\n')
 
 if sys.platform == 'linux':
+    # Keep the proof extraction separate from the user's installed SDK.
+    SDK = ROOT / 'work/quote-native-sdk'
+    env['RUSTC'] = str(SDK / 'rust/bin/rustc')
     from native_sdk import prepare
     target_arguments = prepare(ROOT, SDK, PROOF)
 else:
