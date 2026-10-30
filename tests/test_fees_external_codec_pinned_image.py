@@ -1,104 +1,83 @@
-"""`scripts/fees_external_codec_differential.py` must execute one candidate image per run.
-
-Sibling of merged #2774 (fees sharing create differential), open
-#2782 (fees sharing update differential) and #2765 (fees admin_cto
-differential) and merged #2722, which pinned their candidate images.
-Merged #2774 already pins the load inside `sharing.run()` itself, so
-the remaining gap in this script is at its own boundary: `main()`
-still passes the live candidate/baseline paths in, and reads the
-report's `candidate_sha256` (and `baseline_sha256`) from those live
-paths only at the end — so replacing the candidate file mid-run
-leaves the receipt attributing the run to bytes that were never
-executed. Pinning at this boundary makes the receipt match the
-snapshots actually executed.
-
-The script module itself is not imported here (it needs solders and
-the LiteSVM fixture); only the pinning wiring is checked by AST, so
-the test fails on base (no `pin_program` use, live paths passed to
-`sharing.run` and to the report hash) and passes with the fix. The
-runtime swap is not runnable here (solders is absent).
-"""
-
-import ast
+"""The Fees codec CLI loads and reports one image for original/candidate/baseline."""
+import hashlib
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
-HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
-SCRIPT = ROOT / "scripts" / "fees_external_codec_differential.py"
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / 'scripts/fees_external_codec_differential.py'
+ORIGINAL = ROOT / 'evidence/original/pump_fees/deployed.so'
+OTHER = ROOT / 'evidence/original/mayhem/deployed.so'
+DRIVER = r'''
+import sys, shutil
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import fees_external_codec_differential as codec
+original, candidate, baseline, other, output = sys.argv[2:]
+codec.ORIGINAL = Path(original)
+returns = []
+def hook(frame, event, arg):
+    if event == 'return' and frame.f_code.co_name == 'run' and frame.f_code.co_filename.endswith('fees_sharing_create_differential.py'):
+        returns.append(1)
+        if len(returns) == 3:
+            sys.setprofile(None)
+            for path in (original, candidate, baseline):
+                shutil.copyfile(other, path)
+sys.setprofile(hook)
+sys.argv = [str(codec.__file__), '--candidate', candidate, '--baseline', baseline, '--output', output]
+try:
+    codec.main()
+finally:
+    sys.setprofile(None)
+    if len(returns) < 3:
+        raise RuntimeError('first original/candidate/baseline case did not run')
+'''
 
-
-def load_tree():
-    return ast.parse(SCRIPT.read_text(encoding="utf-8"))
-
-
-def is_live_path(node, attr):
-    return (
-        isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "a"
-        and node.attr == attr
-    )
-
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 class FeesExternalCodecPinnedImageTests(unittest.TestCase):
-    def test_candidate_and_baseline_images_are_pinned(self):
-        tree = load_tree()
-        imported = any(
-            isinstance(node, ast.ImportFrom)
-            and node.module == "pump_amm_reusable_harness"
-            and any(alias.name == "pin_program" for alias in node.names)
-            for node in ast.walk(tree)
-        )
-        self.assertTrue(imported, "pin_program is not imported")
+    def test_all_images_remain_pinned_after_source_paths_change(self):
+        with tempfile.TemporaryDirectory(prefix='fees-codec-images-') as directory:
+            directory = Path(directory)
+            images = [directory / name for name in ('original.so', 'candidate.so', 'baseline.so')]
+            for path in images:
+                shutil.copyfile(ORIGINAL, path)
+            output = directory / 'receipt.json'
+            result = subprocess.run(
+                [sys.executable, '-B', '-c', DRIVER, str(ROOT / 'scripts'),
+                 *map(str, images), str(OTHER), str(output)], cwd=ROOT,
+                capture_output=True, text=True, timeout=180)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            for path in images:
+                self.assertEqual(sha(path), sha(OTHER), 'input path was not replaced')
+            report = json.loads(output.read_text(encoding='utf-8'))
+            for field in ('original_sha256', 'candidate_sha256', 'baseline_sha256'):
+                self.assertEqual(report[field], sha(ORIGINAL))
+            self.assertEqual(report['case_count'], 9)
+            self.assertEqual(report['mismatches'], [])
+            for row in report['cases']:
+                self.assertEqual(row['baseline_errors'], row['original_errors'])
 
-        pinned_args = set()
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "pin_program"
-                and node.args
-                and isinstance(node.args[0], ast.Attribute)
-            ):
-                pinned_args.add(node.args[0].attr)
-        self.assertIn("candidate", pinned_args, "candidate path is not pinned")
-        self.assertIn("baseline", pinned_args, "baseline path is not pinned")
+    def test_normal_wrong_candidate_still_produces_mismatches(self):
+        with tempfile.TemporaryDirectory(prefix='fees-codec-negative-') as directory:
+            output = Path(directory) / 'receipt.json'
+            environment = dict(os.environ)
+            environment.pop('PYTHONOPTIMIZE', None)
+            result = subprocess.run(
+                [sys.executable, '-B', str(SCRIPT), '--candidate', str(OTHER), '--output', str(output)],
+                cwd=ROOT, env=environment, capture_output=True, text=True, timeout=180)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(output.is_file(), result.stdout[-2000:] + result.stderr[-2000:])
+            report = json.loads(output.read_text(encoding='utf-8'))
+            self.assertEqual(report['candidate_sha256'], sha(OTHER))
+            self.assertEqual(report['case_count'], 9)
+            self.assertTrue(report['mismatches'])
 
-        # sharing.run() must never receive a live candidate/baseline path.
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "run"
-                and len(node.args) >= 2
-            ):
-                self.assertFalse(
-                    is_live_path(node.args[1], "candidate"),
-                    "sharing.run receives the live candidate path",
-                )
-                self.assertFalse(
-                    is_live_path(node.args[1], "baseline"),
-                    "sharing.run receives the live baseline path",
-                )
-
-        # The report hashes must not be read from the live paths either.
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "sha"
-                and node.args
-            ):
-                self.assertFalse(
-                    is_live_path(node.args[0], "candidate"),
-                    "report hash is read from the live candidate path",
-                )
-                self.assertFalse(
-                    is_live_path(node.args[0], "baseline"),
-                    "report hash is read from the live baseline path",
-                )
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()
