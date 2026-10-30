@@ -9,7 +9,7 @@ import types
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = 'scripts/reconstruction_roadmap.py'
-REVIEWED = 'f9e3d176a42cdc455ee815b43444b40911921a947ebdc9585288b5d1515f1ef7'
+REVIEWED = '750a60872dba39d138244185f4882c77203c7270681c7ad28e263998f6e0fdce'
 
 
 def trace_handler_attribution(elf, entries, forward, reverse):
