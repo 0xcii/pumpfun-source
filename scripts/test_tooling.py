@@ -1461,6 +1461,20 @@ class SectionTerminalStringTests(unittest.TestCase):
         self.assertEqual(deep_section_analysis.analyze_data_layout(elf)['.rodata']['strings'], [])
 
 
+class AllocationBackscanBarrierTests(unittest.TestCase):
+    sizes = AllocationSizeRegisterTests.sizes
+
+    def test_intervening_operations_do_not_reuse_stale_size(self):
+        for instruction in ((0xbf, 0x61, 0, 0), (0x07, 1, 0, 8),
+                            (0x79, 0x61, 0, 0), (0x85, 0, 0, 123),
+                            (0x05, 0, 0, 0)):
+            with self.subTest(instruction=instruction):
+                self.assertEqual(self.sizes([
+                    (0xb7, 1, 0, 64), instruction,
+                    (0x85, 0, 0, -2081419633),
+                ]), [])
+
+
 class RelocationTargetTests(unittest.TestCase):
     def test_target_section_uses_address_not_file_offset(self):
         blob = bytearray(64)
