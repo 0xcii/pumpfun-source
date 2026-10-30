@@ -241,6 +241,10 @@ def analyze_relocations(elf):
     rel_sec = elf.secs.get(".rel.dyn")
     if not rel_sec:
         return {"count": 0, "entries": [], "type_distribution": {}}
+    # A malformed table is not equivalent to an absent table. Refuse to
+    # publish a valid-looking zero-relocation report for incomplete input.
+    if rel_sec[4] + rel_sec[5] > len(elf.b) or rel_sec[5] % 16:
+        raise ValueError("truncated or misaligned relocation table")
 
     entries = []
     type_counts = collections.Counter()
