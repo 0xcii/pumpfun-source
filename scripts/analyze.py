@@ -92,9 +92,11 @@ def publish_reports(reports):
         for path, text in reports:
             path = pathlib.Path(path)
             descriptor, temporary = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
+            # Register the temporary before writing, so a failed stage is
+            # removed alongside the earlier complete stages.
+            staged.append((pathlib.Path(temporary), path))
             with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as stream:
                 stream.write(text)
-            staged.append((pathlib.Path(temporary), path))
         for temporary, path in staged:
             os.replace(temporary, path)
     finally:
