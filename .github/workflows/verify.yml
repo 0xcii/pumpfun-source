@@ -28,6 +28,10 @@ jobs:
             commands: |
               python -B research/fees-exact-readme-stage-20261030/test_stage.py
               python -B research/fees-exact-readme-stage-20261030/replay.py --repo . --output work/fees-exact-source-staging
+          - suite: fees-linux-rebuild-packet
+            commands: |
+              python -B research/fees-linux-fresh-rebuild-20261030/test_verify.py
+              python -B -O research/fees-linux-fresh-rebuild-20261030/test_verify.py
           - suite: analysis-packet-encoding
             commands: |
               python -B research/tooling-analysis-encoding-20261030/test_verify.py
@@ -42,7 +46,9 @@ jobs:
               python -B reconstruction/harness/test_integrate_failures.py
               python -B reconstruction/harness/test_integrate_no_build_cli.py
               python -B reconstruction/harness/test_integrate_empty_files.py
+              python -B reconstruction/harness/test_integrate_binary_files.py
               python -B reconstruction/harness/test_integrate_source_links.py
+              python -B reconstruction/harness/test_integrate_orig_sources.py
               python -I -B tests/test_integrate_patch_bytes.py
               python -I -B reconstruction/harness/test_treediff_links.py
           - suite: offline-cargo-cache
@@ -57,6 +63,7 @@ jobs:
               python -I -B tests/test_dispatch_root.py
               python -I -B tests/test_analyze_input_admission.py
               python scripts/test_tooling.py
+              python -B scripts/test_pump_diagnostic_audit_coverage.py
               python -B scripts/test_pump_fresh_output_optimized.py
               python -B scripts/test_amm_harness_content_cache.py
               python -B tests/test_amm_pinned_candidate.py
@@ -71,6 +78,7 @@ jobs:
               python -B reconstruction/tooling/serial-input-preservation-20261030/test_serial_admission.py
               python -B scripts/test_pump_compare_window_strict_csv.py
               python -B scripts/test_replay_macos_frontier_optimization.py
+              python -B scripts/test_pump_macos_frontier_qualification_optimization.py
               python -B scripts/test_admin_cto_optimization.py
               python -B scripts/test_build_token_dependency_optimization.py
               python -B scripts/test_revalidate_empty_manifest.py
@@ -82,12 +90,28 @@ jobs:
               python -B scripts/test_mayhem_burn_sequence_optimization.py
               python -B scripts/test_constant_product_range_pinning.py
               python -B scripts/test_fees_validate_all_optimization.py
+              python -B scripts/test_claim_differentials_optimization.py
+              python -B scripts/test_differentials_optimization.py
+              python -B scripts/test_fees_error_messages_precondition.py
               python -B scripts/test_validate_fee_handlers_optimized_exit.py
+              python -B scripts/test_fees_external_codec_optimized_mode.py
+              python -B scripts/test_pump_validate_volume_encoding.py
+              python -B scripts/test_current673_macos_optimized_mode.py
+              python -B scripts/test_pump_differential_optimized_mode.py
               python -B scripts/test_pump_validate_constant_product_optimization.py
               python -B scripts/test_pump_validate_volume_optimization.py
               python -B scripts/test_pump_validate_sell_accounting_optimization.py
               python -B scripts/test_imported_lab_optimization.py
               python -B scripts/test_deep_section_analysis_publication.py
+              python -B scripts/test_pump_data_order_publication.py
+              python -B scripts/test_deep_disassembly_syscall_usage.py
+              python -B scripts/test_disassemble_output_mode.py
+              python -B scripts/test_analyze_publication.py
+              python -B scripts/test_pump_compare_function_bytes_report.py
+              python -B scripts/test_sbpf_disassembly_roundtrip_build_log.py
+              python -B scripts/test_supported_sbpf_package_paths.py
+              python -B scripts/test_pump_quote_control_function_match_output.py
+              python -B reconstruction/toolchain/test_dependency_cache.py
               python -B scripts/test_analyze_program_publication.py
               python -B scripts/test_reconstruction_roadmap_publication.py
               python -B scripts/test_bytecode_signatures_publication.py
@@ -95,13 +119,17 @@ jobs:
               python -B scripts/test_donation_relay_oracle_optimization.py
               python -B -X utf8 tests/test_dispatch_idl_encoding.py
               python -B tests/test_local_validation_idl_encoding.py
+              python -B tests/test_claim_token_incentives_idl_encoding.py
               python -B tests/test_function_body_file_ranges.py
               python -O -B tests/test_function_body_file_ranges.py
               python -B reconstruction/harness/test_treediff_line_boundaries.py
               python -B reconstruction/harness/test_score_inputs.py
+              python -B reconstruction/harness/test_experiment_declared_name.py
+              python -B reconstruction/harness/test_experiment_worktree_source.py
               python -B reconstruction/harness/test_bisect_membership.py
               python -B reconstruction/harness/test_minimize_oracle_encoding.py
               python -B reconstruction/harness/test_coords_cli_admission.py
+              python -B reconstruction/harness/test_report_scorer_inputs.py
               python -B reconstruction/harness/test_match_oracle.py
               python -B reconstruction/harness/test_score_atomic_report.py
               python -B reconstruction/harness/test_coords_report_destination.py

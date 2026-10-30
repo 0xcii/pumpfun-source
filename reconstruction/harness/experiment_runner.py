@@ -58,7 +58,8 @@ def manifest(source):
                 raise ValueError('source symlinks are unsupported')
         if Path(directory) == source:
             dirs[:] = [d for d in dirs if d != 'target']
-        for name in dirs + sorted(files):
+        # A linked worktree or submodule stores .git as a file; staging omits it too.
+        for name in dirs + sorted(name for name in files if name not in ALWAYS_IGNORED):
             path = Path(directory) / name
             if linked_source(path): raise ValueError('linked source inputs are unsupported')
             if path.is_file():
@@ -147,11 +148,15 @@ def run_trial(source, command, destination, inputs=(), timeout=300):
         for arg in command:
             for token, value in replacements.items(): arg = arg.replace(token, value)
             argv.append(arg)
-        argv[0] = str(Path(shutil.which(command[0])).resolve())
+        # Start the hashed binary under its declared name: virtual environments
+        # and rustup proxies select their behaviour from argv[0].
+        declared = shutil.which(command[0])
+        argv[0] = os.path.abspath(declared)
         status, reason, code = 'error', None, None
         with (attempt / 'stdout.log').open('wb') as stdout, (attempt / 'stderr.log').open('wb') as stderr:
             try:
-                process = subprocess.Popen(argv, cwd=work, stdout=stdout, stderr=stderr, start_new_session=True)
+                process = subprocess.Popen(argv, executable=Path(declared).resolve(), cwd=work,
+                                           stdout=stdout, stderr=stderr, start_new_session=True)
             except OSError as error:
                 reason = 'process start failed'
                 stderr.write((str(error) + '\n').encode('utf-8', errors='replace'))

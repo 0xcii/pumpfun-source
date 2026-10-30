@@ -6,6 +6,8 @@ add_quote_control_mint, remove_quote_control_mint and set_quote_control_mint_res
 Uses LiteSVM only, test-owned keys with normal signatures and synthetic QuoteControl state
 on top of the captured Pump Global account. Nothing is broadcast.
 """
+if not __debug__:
+    raise SystemExit('Normal Python is required; do not use -O or PYTHONOPTIMIZE.')
 import argparse, base64, gzip, hashlib, json, pathlib, struct, platform, sys
 from importlib.metadata import version
 from solders.clock import Clock
@@ -21,7 +23,7 @@ from pump_diagnostic_audit import bound_input_key
 
 ROOT = next(p for p in pathlib.Path(__file__).resolve().parents
             if (p / 'evidence/upstream/pump.json').is_file() and (p / 'programs/pump/Cargo.toml').is_file())
-IDL = json.loads((ROOT / 'evidence/upstream/pump.json').read_text())
+IDL = json.loads((ROOT / 'evidence/upstream/pump.json').read_text(encoding='utf-8'))
 PROGRAM = Pubkey.from_string(IDL['address'])
 SYSTEM = Pubkey.from_string('11111111111111111111111111111111')
 GLOBAL = Pubkey.find_program_address([b'global'], PROGRAM)[0]
