@@ -7,6 +7,7 @@ import importlib.metadata
 import json
 import sys
 from pathlib import Path
+from pump_diagnostic_audit import bound_input_key
 
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = ROOT / 'scripts/pump_validate_config_admin.py'
@@ -65,9 +66,10 @@ def main():
     assert not args.output.exists(), 'Use a fresh output path'
     original = ROOT / 'evidence/original/pump/deployed.so'
     inputs = [Path(__file__).resolve(), HARNESS, original,
+              ROOT / 'scripts/pump_diagnostic_audit.py',
               args.candidate.resolve(), ROOT / 'evidence/upstream/pump.json',
               ROOT / 'research/imported-lab/analysis/pump_fun/config-snapshot.json']
-    bound = {str(path.relative_to(ROOT)): sha(path) for path in inputs}
+    bound = {bound_input_key(path, ROOT): sha(path) for path in inputs}
     helpers = fixture()
     pubkey = helpers['Pubkey']
     keys = [pubkey(bytes([value]) * 32) for value in range(31, 39)]
@@ -103,7 +105,7 @@ def main():
     assert len(cases) == 42
     mismatches = [index for index, row in enumerate(cases)
                   if row['different_fields']]
-    assert bound == {str(path.relative_to(ROOT)): sha(path) for path in inputs}
+    assert bound == {bound_input_key(path, ROOT): sha(path) for path in inputs}
     report = {'scope': __doc__ + ' Offline synthetic authority and accounts; no live transactions.',
               'original_sha256': sha(original),
               'candidate_sha256': sha(args.candidate),
