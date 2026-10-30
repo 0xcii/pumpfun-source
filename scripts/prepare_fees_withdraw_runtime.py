@@ -5,11 +5,10 @@ if not __debug__:
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path, PurePosixPath
 import shutil
 import tarfile
-import tempfile
+from deep_disassembly import rename_directory, temporary_sibling
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / 'repro/pump_fees/sharing-second-pump-cpi-v144'
@@ -58,7 +57,7 @@ def prepare(output):
     assert hashlib.sha256(archive.read_bytes()).hexdigest() == manifest[archive.name]
     current_source, binding = current_binding()
     output.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix='.' + output.name + '.', dir=output.parent))
+    staging = temporary_sibling(output, 'staging')
     try:
         count = 0
         with tarfile.open(archive) as source:
@@ -94,7 +93,7 @@ def prepare(output):
                    'current': binding, 'target_executions': 0}
         (staging / 'source-binding-witness.json').write_text(
             json.dumps(witness, indent=2) + '\n')
-        os.replace(staging, output)
+        rename_directory(staging, output, exchange=False)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

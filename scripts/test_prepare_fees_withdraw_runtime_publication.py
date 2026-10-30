@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tarfile
@@ -89,6 +90,32 @@ class FeesRuntimePublicationTests(unittest.TestCase):
         self.assertTrue((output / 'source-binding-witness.json').is_file())
         self.assertTrue((output / 'historical-corrected-source-sha256.json').is_file())
         self.assertEqual(list(output.parent.glob('.runtime.*')), [])
+
+    def test_late_destination_is_preserved(self):
+        output = self.root / 'runtime'
+        real_write = Path.write_text
+
+        def create_competitor(path, *args, **kwargs):
+            result = real_write(path, *args, **kwargs)
+            if path.name == 'source-binding-witness.json':
+                output.mkdir()
+            return result
+
+        with mock.patch.object(Path, 'write_text', create_competitor):
+            with self.assertRaises(FileExistsError):
+                self.tool.prepare(output)
+        self.assertTrue(output.is_dir())
+        self.assertEqual(list(output.iterdir()), [])
+        self.assertEqual(list(output.parent.glob('.runtime.*')), [])
+
+    def test_published_directory_uses_normal_umask(self):
+        output = self.root / 'runtime'
+        previous = os.umask(0o027)
+        try:
+            self.tool.prepare(output)
+        finally:
+            os.umask(previous)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o750)
 
 
 if __name__ == '__main__':
