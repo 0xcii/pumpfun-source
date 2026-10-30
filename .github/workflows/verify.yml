@@ -28,6 +28,10 @@ jobs:
             commands: |
               python -B research/fees-exact-readme-stage-20261030/test_stage.py
               python -B research/fees-exact-readme-stage-20261030/replay.py --repo . --output work/fees-exact-source-staging
+          - suite: fees-linux-rebuild-packet
+            commands: |
+              python -B research/fees-linux-fresh-rebuild-20261030/test_verify.py
+              python -B -O research/fees-linux-fresh-rebuild-20261030/test_verify.py
           - suite: analysis-packet-encoding
             commands: |
               python -B research/tooling-analysis-encoding-20261030/test_verify.py
