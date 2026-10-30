@@ -17,12 +17,15 @@ def download_archive(path,url,expected_sha):
     if path.is_symlink() or path.exists():raise FileExistsError(f'refusing to replace retained archive: {path}')
     partial=path.with_name('.'+path.name+'.partial')
     if partial.is_symlink() or partial.exists():raise FileExistsError(f'refusing to replace retained partial archive: {partial}')
+    created=False
     try:
-        with urllib.request.urlopen(url)as response,partial.open('xb')as f:shutil.copyfileobj(response,f)
+        with partial.open('xb')as f:
+            created=True
+            with urllib.request.urlopen(url)as response:shutil.copyfileobj(response,f)
         if sha(partial)!=expected_sha:raise ValueError(path.name)
         os.link(partial,path)
     finally:
-        partial.unlink(missing_ok=True)
+        if created:partial.unlink(missing_ok=True)
 def run(name,args,env=None):
     with (EVIDENCE/(name+'.log')).open('w')as log:
         p=subprocess.run([str(x)for x in args],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
