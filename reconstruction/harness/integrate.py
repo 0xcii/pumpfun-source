@@ -217,13 +217,16 @@ def main():
         else:
             dry = subprocess.run(patch_command + ['-p2', '--forward', '--dry-run', '-E', '-d', str(src), '-i', str(pf)], capture_output=True, text=True)
         if dry.returncode == 0:
+            # patch leaves a .orig backup after an offset hunk. Source can carry
+            # that name too, such as a vendored Cargo.toml.orig, so only new ones go.
+            sources = set(src.rglob('*.orig'))
             if git_format:
                 subprocess.run(command + [str(pf)], cwd=patch_root, check=True)
                 files = git_patched_files(command, patch_root, directory, pf)
             else:
                 subprocess.run(patch_command + ['-s', '-p2', '--forward', '-E', '-d', str(src), '-i', str(pf)], check=True)
                 files = patched_files(text)
-            for o in src.rglob('*.orig'):
+            for o in set(src.rglob('*.orig')) - sources:
                 o.unlink()
             report['parts'].append({'label': label, 'status': 'applied', 'files': files})
         else:
