@@ -24,7 +24,8 @@ class SourceManifestGuardTests(unittest.TestCase):
                 if Path(path) == linked:
                     fields = {name: getattr(info, name) for name in dir(info)
                               if name.startswith('st_')}
-                    return SimpleNamespace(**fields, st_reparse_tag=0xA0000003)
+                    fields['st_reparse_tag'] = 0xA0000003
+                    return SimpleNamespace(**fields)
                 return info
 
             with patch.object(os, 'lstat', marked), \
