@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Prepare an isolated offline crates.io cache from checksum-verified local archives."""
 import argparse
+import ctypes
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import tempfile
+import sys
 import tomllib
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -94,11 +97,39 @@ if records:
         raise RuntimeError('No local crates.io registry configuration')
     config = configs[0]
     copies.append((config, Path('registry/index'), 'config.json'))
+def publish_directory(staged, destination):
+    """Atomically publish only to an absent path, including concurrent writers."""
+    if os.name == 'nt':
+        staged.rename(destination)  # Windows rename refuses an existing destination.
+        return
+    library = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == 'darwin':
+        rename = getattr(library, 'renamex_np', None)
+        arguments = (os.fsencode(staged), os.fsencode(destination), 0x00000004)
+        types = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]  # RENAME_EXCL
+    elif sys.platform.startswith('linux'):
+        rename = getattr(library, 'renameat2', None)
+        arguments = (-100, os.fsencode(staged), -100, os.fsencode(destination), 1)
+        types = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+                 ctypes.c_uint]  # AT_FDCWD, RENAME_NOREPLACE
+    else:
+        rename = None
+    if rename is None:
+        raise OSError(errno.ENOTSUP, 'atomic no-replace directory publication unavailable')
+    rename.argtypes = types
+    rename.restype = ctypes.c_int
+    if rename(*arguments) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(destination))
+
+
 # Every locked package resolved. Build the complete cache beside the requested
 # path, then publish it with one rename; a failed copy must not poison a rerun.
 args.output.parent.mkdir(parents=True, exist_ok=True)
-staging = Path(tempfile.mkdtemp(prefix='.' + args.output.name + '.', dir=args.output.parent))
+wrapper = Path(tempfile.mkdtemp(prefix='.' + args.output.name + '.', dir=args.output.parent))
+staging = wrapper / 'cache'
 try:
+    staging.mkdir()  # The published directory retains ordinary umask permissions.
     for origin, area, name in copies:
         for namespace in namespaces:
             target = staging / area / namespace / name
@@ -108,8 +139,7 @@ try:
                 'lockfile_sha256': hashlib.sha256(raw_lock).hexdigest(),
                 'registry_config_sha256': sha(config) if config is not None else None, 'packages': records}
     (staging / 'cache-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    staging.rename(args.output)
-except BaseException:
-    shutil.rmtree(staging, ignore_errors=True)
-    raise
+    publish_directory(staging, args.output)
+finally:
+    shutil.rmtree(wrapper, ignore_errors=True)
 print(f'Prepared {len(records)} checksum-verified packages in {args.output}')

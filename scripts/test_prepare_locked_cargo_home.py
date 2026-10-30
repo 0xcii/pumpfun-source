@@ -13,6 +13,76 @@ import unittest
 
 
 class CargoHomeTests(unittest.TestCase):
+    def run_empty_cache(self, root, output, extra_env=None):
+        lock = root / 'empty.lock'
+        lock.write_text('version = 3\npackage = []\n', encoding='utf-8')
+        command = [sys.executable, '-c',
+                   "import os,runpy,sys; os.umask(0o027); "
+                   "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')",
+                   str(Path(__file__).with_name('prepare_locked_cargo_home.py')),
+                   '--lockfile', str(lock), '--output', str(output)]
+        return subprocess.run(command, env={**os.environ, **(extra_env or {})},
+                              capture_output=True, text=True)
+
+    def test_existing_empty_directory_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'output'
+            output.mkdir()
+            result = self.run_empty_cache(root, output)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(output.is_dir())
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(list(root.glob('.output.*')), [])
+
+    def test_late_empty_directory_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'output'
+            injections = root / 'injections'
+            injections.mkdir()
+            (injections / 'sitecustomize.py').write_text(
+                'import os\nfrom pathlib import Path\n'
+                'real_write = Path.write_text\n'
+                'def write(self, *args, **kwargs):\n'
+                '    result = real_write(self, *args, **kwargs)\n'
+                "    if self.name == 'cache-manifest.json':\n"
+                "        Path(os.environ['LATE_OUTPUT']).mkdir()\n"
+                '    return result\n'
+                'Path.write_text = write\n', encoding='utf-8')
+            result = self.run_empty_cache(root, output,
+                {'PYTHONPATH': str(injections), 'LATE_OUTPUT': str(output)})
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(output.is_dir())
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(list(root.glob('.output.*')), [])
+
+    @unittest.skipIf(os.name == 'nt', 'Windows uses its native no-replace rename')
+    def test_unavailable_atomic_publication_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'output'
+            injections = root / 'injections'
+            injections.mkdir()
+            (injections / 'sitecustomize.py').write_text(
+                'import ctypes\nctypes.CDLL = lambda *args, **kwargs: object()\n', encoding='utf-8')
+            result = self.run_empty_cache(root, output, {'PYTHONPATH': str(injections)})
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn('atomic no-replace directory publication unavailable', result.stderr)
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.glob('.output.*')), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX permission mode check')
+    def test_published_directory_keeps_the_process_umask(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'output'
+            result = self.run_empty_cache(root, output)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o750)
+            self.assertTrue((output / 'cache-manifest.json').is_file())
+            self.assertEqual(list(root.glob('.output.*')), [])
+
     @staticmethod
     def sparse_cache(*records):
         return b'\x03\x02\x00\x00\x00offline-fixture\x00' + b''.join(
@@ -182,6 +252,7 @@ class CargoHomeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('injected cache copy failure', result.stderr)
             self.assertFalse(output.exists(), 'failed preparation left a partial cache output')
+            self.assertEqual(list(root.glob('.output.*')), [])
 
     def test_matching_index_is_consumable_by_offline_cargo(self):
         cargo = shutil.which('cargo')
