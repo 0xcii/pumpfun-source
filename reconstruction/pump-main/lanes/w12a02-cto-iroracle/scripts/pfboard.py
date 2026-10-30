@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""pfboard.py <unstripped.so>...: rank admin_cto candidates by perfect-frame ratio (code closeness with
-the frame factored out) next to the plain ratio and size. JSON lines on stdout."""
-import json, sys
+"""pfboard.py <unstripped.so>...: rank admin_cto candidates by a heuristic frame-remap score
+(not emitted code or a proof that frame differences are eliminated) next to the plain ratio and size. JSON lines on stdout."""
+import argparse, json, sys
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -16,6 +16,12 @@ def one(p):
         return {'so': p, 'error': repr(e)[:120]}
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('candidates', nargs='+')
+    args = parser.parse_args()
+    failed = False
     with ProcessPoolExecutor(4) as ex:
-        for r in ex.map(one, sys.argv[1:]):
+        for r in ex.map(one, args.candidates):
+            failed |= 'error' in r
             print(json.dumps(r), flush=True)
+    raise SystemExit(1 if failed else 0)

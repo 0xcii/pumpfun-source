@@ -5,22 +5,27 @@ For each `seg`-instruction segment of the ORIGINAL window: the fraction of its t
 exactly (plain) and after the perfect-frame remap (pf), the unmatched pf token count, and the
 landmarks inside it: error-site line immediates and the original's call targets (resolved
 through the baseline score.json window symbols, which name our matched functions)."""
-import json, re, struct, sys, difflib
+import argparse, json, re, struct, sys, difflib
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ctoracle, framebound  # noqa: E402
 from win import demangle  # noqa: E402
 
 LINES = set(range(250, 800))
-BASE = Path.home() / '.cache/pumpfun-reconstruction/w11/current-baseline/score.json'
+BASE = Path(__file__).resolve().parents[3] / 'baseline/score.json'
 
 
 def tokens_of(p):
     if p.endswith('.so'):
         return ctoracle.so_tokens(p)[0]
     raw = Path(p).read_bytes(); out = []; i = 0
+    if not raw or len(raw) % 8:
+        raise ValueError('raw input must contain whole SBF instructions')
     while i < len(raw):
-        n = 16 if raw[i] == 0x18 else 8; out.append(raw[i:i + n]); i += n
+        n = 16 if raw[i] == 0x18 else 8
+        if i + n > len(raw):
+            raise ValueError('truncated SBF instruction')
+        out.append(raw[i:i + n]); i += n
     return out
 
 
@@ -32,9 +37,16 @@ def short(sym):
 
 
 def main():
-    ctok = tokens_of(sys.argv[1]); seg = int(sys.argv[2]) if len(sys.argv) > 2 else 128
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('candidate')
+    parser.add_argument('segment_size', nargs='?', type=int, default=128)
+    parser.add_argument('--names', type=Path, default=BASE, help='score report used only for landmark labels')
+    args = parser.parse_args()
+    if args.segment_size <= 0:
+        parser.error('segment size must be positive')
+    ctok = tokens_of(args.candidate); seg = args.segment_size
     otok, w = ctoracle.orig_tokens()
-    syms = {int(k): v.get('symbols', []) for k, v in json.load(open(BASE))['windows'].items()}
+    syms = {int(k): v.get('symbols', []) for k, v in json.loads(args.names.read_text(encoding='utf-8'))['windows'].items()}
     starts = sorted(syms)
     import bisect
     def callee(addr):
@@ -67,7 +79,7 @@ def main():
     m0, m1 = matched(ctok), matched(new)
     addr = []; a = 0
     for t in otok: addr.append(a); a += len(t)
-    print(f'ratio {r0}  perfect-frame {r1}   segments of {seg} original instructions')
+    print(f'ratio {r0}  heuristic-frame-remap {r1}   segments of {seg} original instructions')
     print(f'{"orig off":>8} {"plain":>5} {"pf":>4} {"pf-miss":>7}  landmarks')
     for s in range(0, len(otok), seg):
         e = min(s + seg, len(otok))

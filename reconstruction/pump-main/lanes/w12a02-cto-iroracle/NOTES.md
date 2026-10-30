@@ -98,8 +98,8 @@ fi41, T 0x480), so the frame features apply unchanged:
 | runners-up | `bw:bb34.i`/`bw:bb35.i` 2000:1 (the 312 `t==holder_key` / `t==sharing` memcmp tests) | 0.60015 | |
 
 These are block-frequency effects inside validate (they move spill weights and the error blocks'
-placement), the same mechanism w12a08-cto-errorder documents: the original's holder/new tests are
-`trunc` tests that BPI leaves at 50/50, ours get the 62.5/37.5 zero heuristic. Single branch
+placement), the same mechanism w12a08-cto-errorder documents: one hypothesis is that original holder/new tests compile as
+`trunc` tests with the 50/50 BPI heuristic, while this candidate receives the zero heuristic. Single branch
 weights elsewhere are worth <= +0.003.
 
 ### Where the unmatched mass is (scripts/regionmap.py, 256-instruction original segments)
@@ -151,3 +151,19 @@ piece pairs and a 32 B Pubkey slot right after val.sroa.6.i (inlined region end)
 entry) and a 24 B slot, then holder_key (0x6a0) and mint (0x6c0).
 
 Ledger keys: `0x22a10-w12-20a1ae9-iroracle-*`.
+
+
+## Review boundary for region and ranking diagnostics
+
+`regionmap.py` and `pfboard.py` reproduce 0.45147 / 0.58119 on the retained
+27,400-byte k4 candidate. The latter number is a heuristic score after voting
+for stack-offset substitutions in the candidate bytes; it is not an emitted
+build, a proven optimal frame, or proof that stack effects have been isolated.
+Region labels borrow names from the explicit `--names` score report (default:
+the repository baseline), and are an analysis aid rather than original symbols.
+Use these diagnostics to choose source experiments; accept changes only through
+the official raw/normalized scorer. Failed ranking inputs now return nonzero,
+and region segment sizes must be positive. No new matched window is claimed.
+
+Other exploratory IR tables are producer-reported observations, not independently
+replayed in this review. They do not qualify a source candidate for merging.

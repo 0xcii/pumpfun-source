@@ -55,6 +55,9 @@ jobs:
           - suite: admin-cto-call-report
             commands: |
               python -B reconstruction/pump-main/lanes/w12b13-cto-callgraph/test_callseq.py
+          - suite: admin-frame-diagnostics
+            commands: |
+              python -B reconstruction/pump-main/lanes/w12a02-cto-iroracle/test_diagnostics.py
           - suite: composition-patch-bytes
             commands: |
               python -B reconstruction/harness/test_integrate_failures.py
